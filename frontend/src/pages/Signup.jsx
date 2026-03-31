@@ -13,12 +13,13 @@ import { Input } from '../components/ui/Input';
 import { Label } from '../components/ui/Label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 
-const loginSchema = z.object({
+const signupSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Please enter a valid email address'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
-export function LoginPage() {
+export function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { setAuth } = useAuthStore();
   const navigate = useNavigate();
@@ -28,24 +29,22 @@ export function LoginPage() {
     handleSubmit,
     formState: { errors },
   } = useForm({
-    resolver: zodResolver(loginSchema),
+    resolver: zodResolver(signupSchema),
   });
 
   const onSubmit = async (data) => {
     setIsLoading(true);
     try {
-      const res = await authApi.login(data);
-      // Assuming response is unwrapped by interceptor to the body json
-      // and server responds with { data: { user, accessToken } }
-      const authData = res.data || res; 
+      const res = await authApi.register(data);
+      const authData = res.data || res;
       const { user, accessToken } = authData;
       
       localStorage.setItem('accessToken', accessToken);
       setAuth(user, accessToken);
-      toast.success('Successfully logged in!');
+      toast.success('Account created successfully!');
       navigate('/dashboard');
     } catch (err) {
-      toast.error(err.toString() || 'Invalid email or password');
+      toast.error(err.toString() || 'Failed to create account');
     } finally {
       setIsLoading(false);
     }
@@ -63,13 +62,25 @@ export function LoginPage() {
         
         <Card className="shadow-soft-md">
           <CardHeader className="space-y-2 text-center">
-            <CardTitle className="text-2xl">Welcome back</CardTitle>
+            <CardTitle className="text-2xl">Create an account</CardTitle>
             <CardDescription>
-              Enter your credentials to access your account
+              Enter your information to get started
             </CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit(onSubmit)}>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
+                <Input
+                  id="name"
+                  placeholder="John Doe"
+                  {...register('name')}
+                  className={errors.name ? 'border-destructive' : ''}
+                />
+                {errors.name && (
+                  <p className="text-xs text-destructive">{errors.name.message}</p>
+                )}
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -84,12 +95,7 @@ export function LoginPage() {
                 )}
               </div>
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
-                  <Link to="/forgot-password" className="text-xs text-primary hover:underline">
-                    Forgot password?
-                  </Link>
-                </div>
+                <Label htmlFor="password">Password</Label>
                 <Input
                   id="password"
                   type="password"
@@ -104,13 +110,13 @@ export function LoginPage() {
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Signing in...' : 'Sign In'}
+                {isLoading ? 'Creating account...' : 'Create Account'}
                 {!isLoading && <ArrowRight className="ml-2 h-4 w-4" />}
               </Button>
               <div className="text-center text-sm text-muted-foreground w-full">
-                Don't have an account?{' '}
-                <Link to="/signup" className="text-primary font-medium hover:underline">
-                  Sign up
+                Already have an account?{' '}
+                <Link to="/login" className="text-primary font-medium hover:underline">
+                  Sign in
                 </Link>
               </div>
             </CardFooter>
