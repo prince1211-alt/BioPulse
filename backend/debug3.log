@@ -1,0 +1,40 @@
+﻿node : file:///D:/HealthOS/
+BioPulse/backend/src/worker
+s/index.js:18
+At line:1 char:1
++ node src/server.js 2>&1 
+| Out-File -Encoding utf8 
+debug3.log; Get-Con ...
++ ~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo         
+     : NotSpecified: (fil  
+  e:///D:/Heal...ers/ind   
+ ex.js:18:String) [], R    
+emoteException
+    + FullyQualifiedErrorI 
+   d : NativeCommandError
+ 
+import pdfParse from 
+"pdf-parse";
+       ^^^^^^^^
+SyntaxError: The requested 
+module 'pdf-parse' does 
+not provide an export 
+named 'default'
+    at 
+ModuleJob._instantiate (nod
+e:internal/modules/esm/modu
+le_job:228:21)
+    at async ModuleJob.run 
+(node:internal/modules/esm/
+module_job:335:5)
+    at async onImport.trace
+Promise.__proto__ (node:int
+ernal/modules/esm/loader:64
+7:26)
+    at async asyncRunEntryP
+ointWithESMLoader (node:int
+ernal/modules/run_main:117:
+5)
+
+Node.js v22.18.0

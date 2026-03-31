@@ -1,0 +1,256 @@
+﻿[dotenv@17.3.1] injecting env (0) from .env -- tip: ≡ƒöÉ encrypt with Dotenvx: https://dotenvx.com
+node : AggregateError 
+[ECONNREFUSED]: 
+At line:1 char:1
++ node src/server.js 2>&1 
+| Out-File -Encoding utf8 
+debug5.log; Get-Con ...
++ ~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo         
+     : NotSpecified: (Agg  
+  regateError [ECONNREFU   
+ SED]: :String) [], Rem    
+oteException
+    + FullyQualifiedErrorI 
+   d : NativeCommandError
+ 
+    at 
+internalConnectMultiple 
+(node:net:1134:18)
+    at 
+afterConnectMultiple 
+(node:net:1715:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect 
+ECONNREFUSED ::1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 6379
+    },
+    Error: connect 
+ECONNREFUSED 127.0.0.1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 6379
+    }
+  ]
+}
+AggregateError 
+[ECONNREFUSED]: 
+    at 
+internalConnectMultiple 
+(node:net:1134:18)
+    at 
+afterConnectMultiple 
+(node:net:1715:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect 
+ECONNREFUSED ::1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 6379
+    },
+    Error: connect 
+ECONNREFUSED 127.0.0.1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 6379
+    }
+  ]
+}
+AggregateError 
+[ECONNREFUSED]: 
+    at 
+internalConnectMultiple 
+(node:net:1134:18)
+    at 
+afterConnectMultiple 
+(node:net:1715:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect 
+ECONNREFUSED ::1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 6379
+    },
+    Error: connect 
+ECONNREFUSED 127.0.0.1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 6379
+    }
+  ]
+}
+AggregateError 
+[ECONNREFUSED]: 
+    at 
+internalConnectMultiple 
+(node:net:1134:18)
+    at 
+afterConnectMultiple 
+(node:net:1715:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect 
+ECONNREFUSED ::1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 6379
+    },
+    Error: connect 
+ECONNREFUSED 127.0.0.1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 6379
+    }
+  ]
+}
+AggregateError 
+[ECONNREFUSED]: 
+    at 
+internalConnectMultiple 
+(node:net:1134:18)
+    at 
+afterConnectMultiple 
+(node:net:1715:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect 
+ECONNREFUSED ::1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 6379
+    },
+    Error: connect 
+ECONNREFUSED 127.0.0.1:6379
+        at 
+createConnectionError 
+(node:net:1678:14)
+        at 
+afterConnectMultiple 
+(node:net:1708:16) {
+      errno: -4078,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 6379
+    }
+  ]
+}
+ΓÜá∩╕Å [Redis] Offline. 
+Retrying connection... (1)
+≡ƒôª MongoDB connected successfully
+node:events:496
+      throw er; // 
+Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: 
+address already in use 
+:::5000
+    at 
+Server.setupListenHandle 
+[as _listen2] 
+(node:net:1940:16)
+    at listenInCluster 
+(node:net:1997:12)
+    at Server.listen 
+(node:net:2102:7)
+    at startServer (file://
+/D:/HealthOS/BioPulse/backe
+nd/src/server.js:20:12)
+    at process.processTicks
+AndRejections (node:interna
+l/process/task_queues:105:5
+)
+Emitted 'error' event on 
+Server instance at:
+    at emitErrorNT 
+(node:net:1976:8)
+    at process.processTicks
+AndRejections (node:interna
+l/process/task_queues:90:21
+) {
+  code: 'EADDRINUSE',
+  errno: -4091,
+  syscall: 'listen',
+  address: '::',
+  port: 5000
+}
+
+Node.js v22.18.0
