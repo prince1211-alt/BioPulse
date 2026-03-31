@@ -1,5 +1,12 @@
 import dotenv from 'dotenv';
-dotenv.config();
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Explicitly resolve the .env path from the project root
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const requiredEnvVars = [
   'DATABASE_URL',
@@ -34,3 +41,6 @@ export const env = {
   SMTP_PASS: process.env.SMTP_PASS || 'mock',
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || 'mock'
 };
+
+console.log(`📡 [Config] Environment PORT: ${process.env.PORT}, Final PORT: ${env.PORT}`);
+

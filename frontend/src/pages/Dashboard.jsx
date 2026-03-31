@@ -9,7 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../co
 import { Button } from '../components/ui/Button';
 
 // Using Axios interceptors doesn't apply to socket, but we can get the base URL
-const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api/v1', '') || 'http://localhost:5000';
+const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api/v1', '') || 'http://localhost:4000';
 
 export function Dashboard() {
   const { user } = useAuthStore();

@@ -36,13 +36,28 @@ export const register = async (req, res) => {
 
     await user.save();
 
+    // Generate tokens so the user is immediately logged in after signup
+    const { accessToken, refreshToken } = generateTokens({
+      id: user._id.toString(),
+      role: user.role,
+    });
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    await User.findByIdAndUpdate(user._id, { refresh_token: hashedRefreshToken });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
     const userObj = user.toObject();
     delete userObj.password_hash;
     delete userObj.refresh_token;
 
-    return success(res, userObj, "User registered successfully", 201);
+    return success(res, { user: userObj, accessToken }, "User registered successfully", 201);
   } catch (err) {
-    console.error("❌ Register Error:", err);
+    console.error("\u274c Register Error:", err);
     return error(res, "SERVER_ERROR", "Registration failed", 500);
   }
 };
