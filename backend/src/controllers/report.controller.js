@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { HealthReport } from '../models/HealthReport.js';
-import { generatePresignedUrl } from '../utils/s3.js';
+import { generatePresignedUrl, deleteS3Object } from '../utils/s3.js';
 import { ocrQueue, aiAnalysisQueue } from '../queues/index.js';
 import { success, error } from '../utils/response.js';
 
@@ -26,7 +26,7 @@ export const getUploadUrl = async (req, res) => {
     }
 
     filename = sanitizeFilename(filename);
-    const urls = await generatePresignedUrl(filename, contentType);
+    const urls = await generatePresignedUrl(filename, contentType, req.userId);
 
     return success(res, urls);
   } catch (err) {
@@ -40,7 +40,7 @@ export const getUploadUrl = async (req, res) => {
 export const createReport = async (req, res) => {
   try {
     const userId = req.userId;
-    const { file_url, report_type, report_date } = req.body;
+    const { file_url, report_type, report_date, content_type } = req.body;
 
     if (!file_url || !report_type) {
       return error(res, 'VALIDATION_ERROR', 'file_url and report_type required', 400);
@@ -65,6 +65,7 @@ export const createReport = async (req, res) => {
       user_id:         userId,
       file_url,
       report_type,
+      content_type:    content_type || null, // used by OCR worker to detect PDF vs image
       report_date:     report_date || new Date(),
       ocr_status:      'pending',
       analysis_status: 'pending',
@@ -226,6 +227,13 @@ export const deleteReport = async (req, res) => {
 
     const report = await HealthReport.findOneAndDelete({ _id: id, user_id: req.userId });
     if (!report) return error(res, 'NOT_FOUND', 'Report not found', 404);
+
+    // Delete file from S3 (non-blocking — don't fail the request if S3 errors)
+    if (report.file_url) {
+      deleteS3Object(report.file_url).catch((err) =>
+        console.error('[deleteReport] S3 cleanup failed:', err.message)
+      );
+    }
 
     return success(res, { deleted: true }, 'Report deleted');
   } catch (err) {
