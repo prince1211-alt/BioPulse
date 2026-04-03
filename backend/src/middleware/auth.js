@@ -1,28 +1,68 @@
-import { verifyToken } from '../utils/jwt.js';
+import jwt from 'jsonwebtoken';
 import { error } from '../utils/response.js';
 
-export const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return error(res, 'UNAUTHORIZED', 'No access token provided', 401);
-  }
+// ─── AUTHENTICATE ─────────────────────────────────────────────────────────────
+// Verifies the access token and attaches userId + userRole to req
 
-  const token = authHeader.split(' ')[1];
+export const authenticate = (req, res, next) => {
   try {
-    const payload = verifyToken(token, false);
-    req.userId = payload.id;
-    req.userRole = payload.role;
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return error(res, 'NO_TOKEN', 'Authorization token required', 401);
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+
+    req.userId   = decoded.id;
+    req.userRole = decoded.role;
+
     next();
   } catch (err) {
-    return error(res, 'TOKEN_EXPIRED', 'Access token is invalid or expired', 401);
+    if (err.name === 'TokenExpiredError') {
+      return error(res, 'TOKEN_EXPIRED', 'Access token expired', 401);
+    }
+    return error(res, 'INVALID_TOKEN', 'Invalid access token', 401);
   }
 };
 
-export const authorizeRoles = (...roles) => {
-  return (req, res, next) => {
-    if (!req.userRole || !roles.includes(req.userRole)) {
-      return error(res, 'FORBIDDEN', 'You do not have permission to access this resource', 403);
-    }
-    next();
-  };
+// ─── REQUIRE ROLE ─────────────────────────────────────────────────────────────
+// Usage: requireRole('admin') or requireRole('doctor', 'admin')
+
+export const requireRole = (...roles) => (req, res, next) => {
+  if (!req.userRole) {
+    return error(res, 'NO_TOKEN', 'Not authenticated', 401);
+  }
+
+  if (!roles.includes(req.userRole)) {
+    return error(
+      res,
+      'FORBIDDEN',
+      `Access denied. Required role(s): ${roles.join(', ')}`,
+      403
+    );
+  }
+
+  next();
 };
+
+// ─── OPTIONAL AUTH ────────────────────────────────────────────────────────────
+// Attaches userId if token present, but doesn't fail if missing
+
+export const optionalAuth = (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const token  = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+      req.userId   = decoded.id;
+      req.userRole = decoded.role;
+    }
+  } catch {
+    //Ignore errors 
+  }
+  next();
+};
+
+
