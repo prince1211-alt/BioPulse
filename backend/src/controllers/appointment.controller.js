@@ -1,21 +1,66 @@
+import mongoose from 'mongoose';
 import { Appointment, Doctor } from '../models/Appointment.js';
+import { User } from '../models/User.js';
 import { appointmentReminderQueue } from '../queues/index.js';
 import { success, error } from '../utils/response.js';
 
-// =========================
-// 🔹 GET DOCTORS
-// =========================
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const scheduleReminders = async (appointment, userId) => {
+  const scheduledTime = new Date(appointment.scheduled_at).getTime();
+  const now = Date.now();
+
+  if (scheduledTime <= now) return; // past appointment — skip
+
+  const time24h = scheduledTime - 24 * 60 * 60 * 1000;
+  const time1h  = scheduledTime -      60 * 60 * 1000;
+
+  const baseJob = {
+    appointmentId: appointment._id.toString(),
+    userId,
+  };
+  const baseOpts = {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5000 },
+  };
+
+  if (time24h > now) {
+    await appointmentReminderQueue.add(
+      'appointment-reminder-24h',
+      { ...baseJob, type: '24h' },
+      { ...baseOpts, delay: time24h - now, jobId: `appt-${appointment._id}-24h` }
+    );
+  }
+
+  if (time1h > now) {
+    await appointmentReminderQueue.add(
+      'appointment-reminder-1h',
+      { ...baseJob, type: '1h' },
+      { ...baseOpts, delay: time1h - now, jobId: `appt-${appointment._id}-1h` }
+    );
+  }
+};
+
+const removeReminders = async (appointmentId) => {
+  const ids = [`appt-${appointmentId}-24h`, `appt-${appointmentId}-1h`];
+  for (const jobId of ids) {
+    const job = await appointmentReminderQueue.getJob(jobId);
+    if (job) await job.remove();
+  }
+};
+
+// ─── DOCTORS ──────────────────────────────────────────────────────────────────
+
+// GET /doctors?specialisation=cardiology
 export const getDoctors = async (req, res) => {
   try {
-    const { specialisation } = req.query;  // /doctors?specialisation=cardiologist 
+    const { specialisation } = req.query;
+    const filter = { role: 'doctor' };
+    if (specialisation) filter.specialisation = specialisation;
 
-    const search = specialisation
-      ? { specialisation } // agar specialisation = cardiologist hai to cardiologist ko search krega
-      : {}; // agar specialisation nahi hai to sabhi doctors ko search krega
-
-    const doctors = await Doctor.find(search).select( // todo
-      'name specialisation available_slots'
-    );
+    const doctors = await User.find(filter)
+      .select('name specialisation qualification experience_years avatar_url consultation_fee')
+      .lean();
 
     return success(res, doctors);
   } catch (err) {
@@ -24,33 +69,101 @@ export const getDoctors = async (req, res) => {
   }
 };
 
-// =========================
-// 🔹 GET DOCTOR SLOTS
-// =========================
+// GET /doctors/:id/slots
 export const getDoctorSlots = async (req, res) => {
   try {
-    const doctor = await Doctor.findById(req.params.id).select( // /doctor/123 url se id lega
-      'available_slots'  // todo
-    );
+    const doctor = await Doctor.findById(req.params.id).select('available_slots');
+    if (!doctor) return error(res, 'NOT_FOUND', 'Doctor not found', 404);
 
-    if (!doctor)
-      return error(res, 'NOT_FOUND', 'Doctor not found', 404);
+    // Return only future slots
+    const now = new Date();
+    const futureSlots = (doctor.available_slots || []).filter((s) => new Date(s) > now);
 
-    return success(res, doctor.available_slots || []); // slot return krega
+    return success(res, futureSlots);
   } catch (err) {
     console.error(err);
     return error(res, 'SERVER_ERROR', 'Failed to fetch slots', 500);
   }
 };
 
-// =========================
-// 🔹 GET APPOINTMENTS
-// =========================
+// ─── DOCTOR: MANAGE OWN SLOTS ─────────────────────────────────────────────────
+
+// POST /doctors/slots  — doctor adds available slots
+export const addSlots = async (req, res) => {
+  try {
+    const { slots } = req.body; // array of ISO date strings
+
+    if (!Array.isArray(slots) || slots.length === 0) {
+      return error(res, 'VALIDATION_ERROR', 'slots array is required', 400);
+    }
+
+    const parsed = slots.map((s) => new Date(s));
+    if (parsed.some((d) => isNaN(d.getTime()))) {
+      return error(res, 'VALIDATION_ERROR', 'One or more slots have invalid dates', 400);
+    }
+
+    const now = new Date();
+    const future = parsed.filter((d) => d > now);
+    if (future.length === 0) {
+      return error(res, 'VALIDATION_ERROR', 'All slots are in the past', 400);
+    }
+
+    let doc = await Doctor.findById(req.userId);
+    if (!doc) {
+      doc = new Doctor({ _id: req.userId, available_slots: [] });
+    }
+
+    // Deduplicate
+    const existingMs = new Set(doc.available_slots.map((s) => new Date(s).getTime()));
+    const newSlots   = future.filter((s) => !existingMs.has(s.getTime()));
+    doc.available_slots.push(...newSlots);
+    await doc.save();
+
+    return success(res, doc.available_slots, `${newSlots.length} slot(s) added`);
+  } catch (err) {
+    console.error(err);
+    return error(res, 'SERVER_ERROR', 'Failed to add slots', 500);
+  }
+};
+
+// DELETE /doctors/slots  — doctor removes a slot
+export const removeSlot = async (req, res) => {
+  try {
+    const { slot } = req.body; // ISO date string
+
+    if (!slot) return error(res, 'VALIDATION_ERROR', 'slot is required', 400);
+
+    const doc = await Doctor.findById(req.userId);
+    if (!doc) return error(res, 'NOT_FOUND', 'Doctor record not found', 404);
+
+    const slotTime = new Date(slot).getTime();
+    doc.available_slots = doc.available_slots.filter(
+      (s) => new Date(s).getTime() !== slotTime
+    );
+    await doc.save();
+
+    return success(res, { removed: true });
+  } catch (err) {
+    console.error(err);
+    return error(res, 'SERVER_ERROR', 'Failed to remove slot', 500);
+  }
+};
+
+// ─── PATIENT: APPOINTMENTS ────────────────────────────────────────────────────
+
+// GET /appointments
 export const getAppointments = async (req, res) => {
   try {
-    const list = await Appointment.find({ user_id: req.userId }) // sirf current user ka appointment dikhayega
-      .populate('doctor_id', 'name specialisation') // todo
-      .sort({ scheduled_at: 1 });
+    const filter =
+      req.userRole === 'doctor'
+        ? { doctor_id: req.userId }
+        : { user_id: req.userId };
+
+    const list = await Appointment.find(filter)
+      .populate('doctor_id', 'name specialisation avatar_url')
+      .populate('user_id', 'name email age')
+      .sort({ scheduled_at: 1 })
+      .lean();
 
     return success(res, list);
   } catch (err) {
@@ -59,169 +172,170 @@ export const getAppointments = async (req, res) => {
   }
 };
 
-// =========================
-// 🔹 BOOK APPOINTMENT
-// =========================
+// POST /appointments
 export const bookAppointment = async (req, res) => {
   try {
-    const userId = req.userId; // userid middleware se aayega
-    const { doctor_id, scheduled_at, type } = req.body; // doctor_id, scheduled_at, type body se aayega
+    const userId = req.userId;
+    const { doctor_id, scheduled_at, type, notes } = req.body;
 
-    // ✅ Validation
-    if (!doctor_id || !scheduled_at) { // doctor_id and scheduled_at required hai
-      return error(
-        res,
-        'VALIDATION_ERROR',
-        'doctor_id and scheduled_at required',
-        400
-      );
+    if (!doctor_id || !scheduled_at) {
+      return error(res, 'VALIDATION_ERROR', 'doctor_id and scheduled_at required', 400);
     }
 
-    // ✅ Check doctor exists
-    const doctor = await Doctor.findById(doctor_id);
-    if (!doctor)
-      return error(res, 'NOT_FOUND', 'Doctor not found', 404);
+    const scheduled = new Date(scheduled_at);
+    if (isNaN(scheduled.getTime()) || scheduled <= new Date()) {
+      return error(res, 'VALIDATION_ERROR', 'scheduled_at must be a future date', 400);
+    }
 
-    // ✅ Prevent double booking
+    const doctor = await Doctor.findById(doctor_id);
+    if (!doctor) return error(res, 'NOT_FOUND', 'Doctor not found', 404);
+
+    // Slot must be in doctor's available_slots
+    const slotExists = doctor.available_slots?.some(
+      (s) => new Date(s).getTime() === scheduled.getTime()
+    );
+    if (!slotExists) {
+      return error(res, 'SLOT_UNAVAILABLE', 'Selected slot is not available', 400);
+    }
+
+    // Prevent double booking
     const existing = await Appointment.findOne({
       doctor_id,
-      scheduled_at,
+      scheduled_at: scheduled,
       status: { $ne: 'cancelled' },
     });
-
     if (existing) {
-      return error(
-        res,
-        'SLOT_TAKEN',
-        'This slot is already booked',
-        400
-      );
+      return error(res, 'SLOT_TAKEN', 'This slot is already booked', 400);
     }
 
-    // ✅ Create appointment
     const appointment = await Appointment.create({
       doctor_id,
-      scheduled_at,
-      type: type || 'consultation',
       user_id: userId,
+      scheduled_at: scheduled,
+      type: type || 'consultation',
+      notes: notes || '',
       status: 'scheduled',
     });
 
+    // Remove the booked slot from available_slots
+    doctor.available_slots = doctor.available_slots.filter(
+      (s) => new Date(s).getTime() !== scheduled.getTime()
+    );
+    await doctor.save();
+
     await appointment.populate('doctor_id', 'name specialisation');
+    await scheduleReminders(appointment, userId);
 
-    // =========================
-    // ⏰ SCHEDULE REMINDERS
-    // =========================
-    const scheduledTime = new Date(scheduled_at).getTime(); // scheduled_at ko milliseconds me convert krega
-    const now = Date.now(); // current time ko milliseconds me convert krega
-
-    const time24h = scheduledTime - 24 * 60 * 60 * 1000; // 24 hours before appointment
-    const time1h = scheduledTime - 60 * 60 * 1000; // 1 hour before appointment
-
-
-    const scheduledTimeApp = new Date(appointment.scheduled_at).getTime();
-
-    // Skip if already past
-    if (scheduledTimeApp < now) {
-      return success(res, appointment, "Booked but reminder skipped (past time)");
-    }
-
-    if (time24h > now) { // agar 24 hours before appointment hai to reminder add krega
-      await appointmentReminderQueue.add( // worker ke pass bhejega
-        'appointment-reminder-24h', // job name
-        {
-          appointmentId: appointment._id.toString(), // appointment id
-          userId, // user id
-          type: '24h', // type
-        },
-        {
-          delay: time24h - now, // delay in milliseconds
-          jobId: `appt-${appointment._id}-24h`, // job id
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000
-          }
-        }
-      );
-    }
-
-    if (time1h > now) {
-      await appointmentReminderQueue.add(
-        'appointment-reminder-1h',
-        {
-          appointmentId: appointment._id.toString(),
-          userId,
-          type: '1h',
-        },
-        {
-          delay: time1h - now,
-          jobId: `appt-${appointment._id}-1h`,
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000
-          }
-        }
-      );
-    }
-
-    const apptObj = appointment.toObject();
-    apptObj.doctor = apptObj.doctor_id;
+    const apptObj        = appointment.toObject();
+    apptObj.doctor       = apptObj.doctor_id;
     delete apptObj.doctor_id;
 
-    return success(res, apptObj, undefined, 201);
+    return success(res, apptObj, 'Appointment booked', 201);
   } catch (err) {
     console.error(err);
     return error(res, 'SERVER_ERROR', 'Failed to book appointment', 500);
   }
 };
 
-// =========================
-// 🔹 AUTO BOOK (SMART)
-// =========================
-export const autoBook = async (req, res) => {
+// PATCH /appointments/:id/reschedule
+export const rescheduleAppointment = async (req, res) => {
   try {
-    const { doctor_id, window_days, trigger_medicine_id } = req.body; // doctor_id, window_days, trigger_medicine_id body se aayega
-    const userId = req.userId; // userid middleware se aayega
+    const { new_scheduled_at } = req.body;
 
-    const doctor = await Doctor.findById(doctor_id); // doctor ko find krega
-    if (!doctor)
-      return error(res, 'NOT_FOUND', 'Doctor not found', 404);
-
-    const slots = doctor.available_slots || []; // available slots
-
-    const now = new Date(); // current time
-    const windowEnd = new Date(); // window end time
-    windowEnd.setDate(now.getDate() + window_days); // window end time ko window_days se update krega
-
-    // ✅ Find earliest available slot
-    const availableSlot = slots
-      .map((s) => new Date(s)) // slots ko date me convert krega
-      .filter((s) => s > now && s <= windowEnd) // current time and window end time ke beech ke slots ko filter krega
-      .sort((a, b) => a - b)[0]; // earliest slot ko select krega
-
-    if (!availableSlot) {
-      return error(
-        res,
-        'NO_SLOTS',
-        'No slots available in that window',
-        400
-      );
+    if (!new_scheduled_at) {
+      return error(res, 'VALIDATION_ERROR', 'new_scheduled_at is required', 400);
     }
 
-    // ✅ Prevent double booking
+    const newTime = new Date(new_scheduled_at);
+    if (isNaN(newTime.getTime()) || newTime <= new Date()) {
+      return error(res, 'VALIDATION_ERROR', 'new_scheduled_at must be a future date', 400);
+    }
+
+    const appointment = await Appointment.findOne({
+      _id: req.params.id,
+      user_id: req.userId,
+      status: 'scheduled',
+    });
+
+    if (!appointment) {
+      return error(res, 'NOT_FOUND', 'Active appointment not found', 404);
+    }
+
+    // Check new slot availability
+    const doctor   = await Doctor.findById(appointment.doctor_id);
+    const slotFree = doctor?.available_slots?.some(
+      (s) => new Date(s).getTime() === newTime.getTime()
+    );
+    if (!slotFree) {
+      return error(res, 'SLOT_UNAVAILABLE', 'New slot is not available', 400);
+    }
+
+    const conflict = await Appointment.findOne({
+      doctor_id:    appointment.doctor_id,
+      scheduled_at: newTime,
+      status:       { $ne: 'cancelled' },
+      _id:          { $ne: appointment._id },
+    });
+    if (conflict) {
+      return error(res, 'SLOT_TAKEN', 'New slot already booked', 400);
+    }
+
+    // Restore old slot, consume new slot
+    if (doctor) {
+      doctor.available_slots.push(appointment.scheduled_at);
+      doctor.available_slots = doctor.available_slots.filter(
+        (s) => new Date(s).getTime() !== newTime.getTime()
+      );
+      await doctor.save();
+    }
+
+    await removeReminders(appointment._id);
+
+    appointment.scheduled_at = newTime;
+    appointment.status       = 'rescheduled';
+    await appointment.save();
+
+    await scheduleReminders(appointment, req.userId);
+
+    return success(res, appointment, 'Appointment rescheduled');
+  } catch (err) {
+    console.error(err);
+    return error(res, 'SERVER_ERROR', 'Failed to reschedule appointment', 500);
+  }
+};
+
+// POST /appointments/auto-book
+export const autoBook = async (req, res) => {
+  try {
+    const { doctor_id, window_days = 7, trigger_medicine_id } = req.body;
+    const userId = req.userId;
+
+    const doctor = await Doctor.findById(doctor_id);
+    if (!doctor) return error(res, 'NOT_FOUND', 'Doctor not found', 404);
+
+    const now       = new Date();
+    const windowEnd = new Date();
+    windowEnd.setDate(now.getDate() + window_days);
+
+    const availableSlot = (doctor.available_slots || [])
+      .map((s) => new Date(s))
+      .filter((s) => s > now && s <= windowEnd)
+      .sort((a, b) => a - b)[0];
+
+    if (!availableSlot) {
+      return error(res, 'NO_SLOTS', 'No slots available in that window', 400);
+    }
+
     const existing = await Appointment.findOne({
       doctor_id,
       scheduled_at: availableSlot,
       status: { $ne: 'cancelled' },
     });
-
     if (existing) {
       return error(res, 'SLOT_TAKEN', 'Slot already booked', 400);
     }
 
-    const appointment = await Appointment.create({ // appointment create krega
+    const appointment = await Appointment.create({
       doctor_id,
       scheduled_at: availableSlot,
       type: 'follow-up',
@@ -231,101 +345,84 @@ export const autoBook = async (req, res) => {
       status: 'scheduled',
     });
 
-    await appointment.populate('doctor_id', 'name specialisation'); // doctor ko populate krega
+    doctor.available_slots = doctor.available_slots.filter(
+      (s) => new Date(s).getTime() !== availableSlot.getTime()
+    );
+    await doctor.save();
 
-    // 🔔 schedule reminders (reuse logic)
-    const scheduledTime = availableSlot.getTime(); // scheduled_at ko milliseconds me convert krega
-    const nowMs = Date.now(); // current time ko milliseconds me convert krega
+    await appointment.populate('doctor_id', 'name specialisation');
+    await scheduleReminders(appointment, userId);
 
-    const time24h = scheduledTime - 24 * 60 * 60 * 1000; // 24 hours before appointment
-    const time1h = scheduledTime - 60 * 60 * 1000; // 1 hour before appointment
+    const apptObj  = appointment.toObject();
+    apptObj.doctor = apptObj.doctor_id;
+    delete apptObj.doctor_id;
 
-    const scheduledTimeApp = new Date(appointment.scheduled_at).getTime();
-
-    // Skip if already past
-    if (scheduledTimeApp < nowMs) return;
-
-    if (time24h > nowMs) { // agar 24 hours before appointment hai to reminder add krega
-      await appointmentReminderQueue.add(
-        'appointment-reminder-24h',
-        {
-          appointmentId: appointment._id.toString(),
-          userId,
-          type: '24h',
-        },
-        {
-          delay: time24h - nowMs,
-          jobId: `appt-${appointment._id}-24h`,
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000
-          }
-        }
-      );
-    }
-
-    if (time1h > nowMs) { // agar 1 hour before appointment hai to reminder add krega
-      await appointmentReminderQueue.add(
-        'appointment-reminder-1h',
-        {
-          appointmentId: appointment._id.toString(),
-          userId,
-          type: '1h',
-        },
-        {
-          delay: time1h - nowMs,
-          jobId: `appt-${appointment._id}-1h`,
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000
-          }
-        }
-      );
-    }
-
-    const apptObj = appointment.toObject(); // appointment ko object me convert krega
-    apptObj.doctor = apptObj.doctor_id; // doctor ko populate krega
-    delete apptObj.doctor_id; // doctor_id ko delete krega
-
-    return success(res, apptObj, undefined, 201); // appointment ko return krega
+    return success(res, apptObj, 'Auto-booked appointment', 201);
   } catch (err) {
     console.error(err);
     return error(res, 'SERVER_ERROR', 'Failed to auto-book', 500);
   }
 };
 
-// =========================
-// 🔹 CANCEL APPOINTMENT
-// =========================
+// DELETE /appointments/:id
 export const cancelAppointment = async (req, res) => {
   try {
-    const appointment = await Appointment.findOne({ // appointment ko find krega
-      _id: req.params.id, // appointment id
-      user_id: req.userId, // user id
-    });
+    const filter =
+      req.userRole === 'doctor'
+        ? { _id: req.params.id, doctor_id: req.userId }
+        : { _id: req.params.id, user_id: req.userId };
 
-    if (!appointment) // agar appointment nahi hai to error return krega  
-      return error(res, 'NOT_FOUND', 'Appointment not found', 404);
+    const appointment = await Appointment.findOne(filter);
+    if (!appointment) return error(res, 'NOT_FOUND', 'Appointment not found', 404);
 
-    appointment.status = 'cancelled'; // status ko cancelled me change krega
-    await appointment.save(); // appointment ko save krega
+    if (appointment.status === 'cancelled') {
+      return error(res, 'ALREADY_CANCELLED', 'Appointment already cancelled', 400);
+    }
 
-    // ✅ Remove jobs safely
-    const job1 = await appointmentReminderQueue.getJob( // job ko get krega
-      `appt-${appointment._id}-24h` // job id
-    );
-    if (job1) await job1.remove(); // job ko remove krega
+    // Restore slot to doctor's availability
+    const doctor = await Doctor.findById(appointment.doctor_id);
+    if (doctor) {
+      doctor.available_slots.push(appointment.scheduled_at);
+      await doctor.save();
+    }
 
-    const job2 = await appointmentReminderQueue.getJob( // job ko get krega
-      `appt-${appointment._id}-1h` // job id
-    );
-    if (job2) await job2.remove(); // job ko remove krega
+    appointment.status = 'cancelled';
+    await appointment.save();
 
-    return success(res, { cancelled: true }); // appointment ko return krega
+    await removeReminders(appointment._id);
+
+    return success(res, { cancelled: true });
   } catch (err) {
     console.error(err);
     return error(res, 'SERVER_ERROR', 'Failed to cancel appointment', 500);
+  }
+};
+
+// PATCH /appointments/:id/status  — doctor marks as completed / no-show
+export const updateAppointmentStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const VALID = ['completed', 'no_show'];
+
+    if (!VALID.includes(status)) {
+      return error(res, 'VALIDATION_ERROR', `status must be one of: ${VALID.join(', ')}`, 400);
+    }
+
+    const appointment = await Appointment.findOne({
+      _id:       req.params.id,
+      doctor_id: req.userId,         // only the doctor can mark outcomes
+    });
+
+    if (!appointment) {
+      return error(res, 'NOT_FOUND', 'Appointment not found', 404);
+    }
+
+    appointment.status = status;
+    await appointment.save();
+
+    return success(res, appointment);
+  } catch (err) {
+    console.error(err);
+    return error(res, 'SERVER_ERROR', 'Failed to update status', 500);
   }
 };
