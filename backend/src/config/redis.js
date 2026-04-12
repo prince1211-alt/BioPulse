@@ -4,7 +4,7 @@ import { env } from './env.js';
 export const redisConnection = new Redis(env.REDIS_URL, {
   maxRetriesPerRequest: null,
   enableOfflineQueue: true,
-  lazyConnect: true,
+  // lazyConnect strictly breaks BullMQ queue watchers
   connectTimeout: 15000,
   retryStrategy(times) {
     if (times > 10) {
