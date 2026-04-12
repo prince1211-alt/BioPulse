@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { createMedicine, getMedicines, deleteMedicine, logDose, getTodaySchedule } from '../controllers/medicine.controller.js';
-import { authenticate } from '../middleware/auth.js';
+import { createMedicine, getMedicines, getMedicineById, updateMedicine, deleteMedicine, logDose, getTodaySchedule, getAdherenceStats } from '../controllers/medicine.controller.js';
+import { authenticate } from '../middleware/auth_middleware.js';
 import { validate } from '../middleware/validate.js';
 import { createMedicineSchema, logDoseSchema } from '../schemas/medicine.schema.js';
 
@@ -9,8 +9,11 @@ const router = Router();
 router.use(authenticate);
 router.post('/', validate(createMedicineSchema), createMedicine);
 router.get('/', getMedicines);
+router.get('/schedule/today', getTodaySchedule);
+router.get('/adherence', getAdherenceStats);
+router.post('/log', validate(logDoseSchema), logDose);
+router.get('/:id', getMedicineById);
+router.patch('/:id', updateMedicine);
 router.delete('/:id', deleteMedicine);
-router.get('/today', getTodaySchedule);
-router.post('/logs', validate(logDoseSchema), logDose);
 
 export default router;
