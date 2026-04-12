@@ -14,18 +14,16 @@ const medicineSchema = new mongoose.Schema(
     },
 
     dosage: {
-      type: Number,
+      type: String,   // e.g. '500mg' or '10'
       required: true,
     },
 
     unit: {
-      type: String,
-      required: true,
+      type: String,   // optional separate unit field
     },
 
     frequency: {
-      type: String,
-      required: true,
+      type: String,   // optional: 'daily', 'weekly', 'custom'
     },
 
     times: {
@@ -39,7 +37,7 @@ const medicineSchema = new mongoose.Schema(
 
     start_date: {
       type: Date,
-      required: true,
+      default: Date.now,
     },
 
     end_date: {
@@ -48,6 +46,10 @@ const medicineSchema = new mongoose.Schema(
 
     days_supply: {
       type: Number,
+    },
+
+    notes: {
+      type: String,
     },
 
     is_active: {
@@ -85,7 +87,7 @@ const medicineLogSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['pending', 'taken', 'skipped', 'snoozed'],
+      enum: ['pending', 'taken', 'missed', 'skipped', 'snoozed'],
       default: 'pending',
     },
 
