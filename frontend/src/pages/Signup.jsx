@@ -36,7 +36,7 @@ export function SignupPage() {
     setIsLoading(true);
     try {
       const res = await authApi.register(data);
-      const authData = res.data || res;
+      const authData = res.data?.data || res.data;
       const { user, accessToken } = authData;
       
       localStorage.setItem('accessToken', accessToken);
@@ -86,7 +86,7 @@ export function SignupPage() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="name@example.com"
+                  placeholder="Enter your email"
                   {...register('email')}
                   className={errors.email ? 'border-destructive' : ''}
                 />
@@ -99,7 +99,7 @@ export function SignupPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="Enter your password"
                   {...register('password')}
                   className={errors.password ? 'border-destructive' : ''}
                 />

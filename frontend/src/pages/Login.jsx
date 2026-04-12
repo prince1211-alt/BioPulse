@@ -37,7 +37,7 @@ export function LoginPage() {
       const res = await authApi.login(data);
       // Assuming response is unwrapped by interceptor to the body json
       // and server responds with { data: { user, accessToken } }
-      const authData = res.data || res; 
+      const authData = res.data?.data || res.data; 
       const { user, accessToken } = authData;
       
       localStorage.setItem('accessToken', accessToken);
@@ -75,7 +75,7 @@ export function LoginPage() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="name@example.com"
+                  placeholder="Enter your email"
                   {...register('email')}
                   className={errors.email ? 'border-destructive' : ''}
                 />
@@ -93,7 +93,7 @@ export function LoginPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
+                  placeholder="Enter your password"
                   {...register('password')}
                   className={errors.password ? 'border-destructive' : ''}
                 />

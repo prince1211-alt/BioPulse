@@ -1,222 +1,335 @@
-import React, { useEffect, useState } from 'react';
-import { io } from 'socket.io-client';
-import { useAuthStore } from '../stores/authStore';
+import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Activity, Pill, CalendarCheck, FileText, TrendingUp, Bell } from 'lucide-react';
+import {
+  Activity, Pill, CalendarCheck, FileText,
+  TrendingUp, Bell, AlertTriangle, CheckCircle,
+  Clock, ArrowRight, Stethoscope,
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/Card';
+import { useAuthStore }        from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
+import { useMedicineStore }     from '../stores/medicineStore';
+import { useSocket }            from '../hooks/useSocket';
+
+import { reportApi }      from '../api/report.api';
+import { appointmentApi } from '../api/appointment.api';
+import { medicineApi }    from '../api/medicine.api';
+
+import {
+  Card, CardHeader, CardTitle,
+  CardContent, CardDescription,
+} from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
+import { Skeleton } from '../components/ui/Skeleton';
 
-// Using Axios interceptors doesn't apply to socket, but we can get the base URL
-const SOCKET_URL = import.meta.env.VITE_API_URL?.replace('/api/v1', '') || 'http://localhost:4000';
+// ── Stat card ─────────────────────────────────────────────────────────────────
+function StatCard({ title, value, suffix, sub, icon: Icon, iconBg, iconColor, trend }) {
+  return (
+    <Card className="hover:shadow-md transition-shadow">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+        <div className={`h-8 w-8 rounded-full ${iconBg} flex items-center justify-center`}>
+          <Icon className={`h-4 w-4 ${iconColor}`} />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="text-3xl font-bold">
+          {value}
+          {suffix && <span className="text-lg text-muted-foreground font-normal">{suffix}</span>}
+        </div>
+        {trend && (
+          <p className="text-xs text-emerald-600 flex items-center mt-1 font-medium">
+            <TrendingUp className="h-3 w-3 mr-1" /> {trend}
+          </p>
+        )}
+        {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+      </CardContent>
+    </Card>
+  );
+}
 
-export function Dashboard() {
-  const { user } = useAuthStore();
-  const [notifications, setNotifications] = useState([
-    // Mock initial notification for better UX
-    { id: '1', text: 'Welcome to BioPulse! Upload your first report to get started.', type: 'SYSTEM', read: false }
-  ]);
+// ── Notification list ─────────────────────────────────────────────────────────
+function NotificationPanel() {
+  const { notifications, markRead, markAllRead, unreadCount } = useNotificationStore();
+  const count = unreadCount();
 
-  useEffect(() => {
-    if (!user) return;
-    
-    // Connect to websocket for real-time notifications
-    const socket = io(SOCKET_URL, {
-      withCredentials: true
-    });
-    
-    socket.on('connect', () => {
-      socket.emit('join', user._id || user.id);
-    });
-    
-    socket.on('notification', data => {
-      setNotifications(prev => [{
-        id: Date.now().toString(),
-        text: data.message,
-        type: data.type,
-        read: false
-      }, ...prev]);
-    });
-    
-    return () => {
-      socket.disconnect();
-    };
-  }, [user]);
-
-  const unreadCount = notifications.filter(n => !n.read).length;
-
-  const markAsRead = (id) => {
-    setNotifications(prev => 
-      prev.map(n => n.id === id ? { ...n, read: true } : n)
-    );
+  const TYPE_ICON = {
+    medicine:    <Pill className="h-3.5 w-3.5 text-purple-500" />,
+    appointment: <CalendarCheck className="h-3.5 w-3.5 text-blue-500" />,
+    report_ready:<FileText className="h-3.5 w-3.5 text-primary" />,
+    low_stock:   <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />,
+    SYSTEM:      <Bell className="h-3.5 w-3.5 text-muted-foreground" />,
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
-            Hello, <span className="text-primary">{user?.name?.split(' ')[0] || 'User'}</span>
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            {format(new Date(), 'EEEE, MMMM do, yyyy')}
-          </p>
+    <Card className="flex flex-col h-full max-h-[480px]">
+      <CardHeader className="pb-3 border-b shrink-0">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Bell className="h-4 w-4 text-muted-foreground" /> Notifications
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            {count > 0 && (
+              <>
+                <span className="bg-primary text-primary-foreground text-xs px-2 py-0.5 rounded-full font-semibold">
+                  {count}
+                </span>
+                <button
+                  onClick={markAllRead}
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  Clear all
+                </button>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      </CardHeader>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Health Score</CardTitle>
-            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-              <Activity className="h-4 w-4 text-primary" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-foreground">84<span className="text-lg text-muted-foreground font-normal">/100</span></div>
-            <p className="text-xs text-emerald-600 flex items-center mt-1 font-medium">
-              <TrendingUp className="h-3 w-3 mr-1" /> +2.5% from last month
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Active Reports</CardTitle>
-            <div className="h-8 w-8 rounded-full bg-blue-500/10 flex items-center justify-center">
-              <FileText className="h-4 w-4 text-blue-500" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-foreground">3</div>
-            <p className="text-xs text-muted-foreground mt-1 text-balance">
-              Latest: CBC Panel (2 days ago)
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming Visits</CardTitle>
-            <div className="h-8 w-8 rounded-full bg-amber-500/10 flex items-center justify-center">
-              <CalendarCheck className="h-4 w-4 text-amber-500" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-foreground">1</div>
-            <p className="text-xs text-muted-foreground mt-1 text-balance">
-              Dr. Sarah Smith • Tomorrow
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="hover:shadow-md transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Daily Medicines</CardTitle>
-            <div className="h-8 w-8 rounded-full bg-purple-500/10 flex items-center justify-center">
-              <Pill className="h-4 w-4 text-purple-500" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-foreground">2<span className="text-lg text-muted-foreground font-normal">/3</span></div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Doses taken today
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Main Content Area */}
-        <div className="lg:col-span-2 space-y-8">
-          <Card>
-            <CardHeader>
-              <CardTitle>Recent Reports Overview</CardTitle>
-              <CardDescription>AI insights from your latest uploads</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {/* Mock Report Item */}
-                <div className="flex items-start justify-between p-4 border rounded-xl hover:bg-muted/50 transition-colors">
-                  <div className="flex gap-4">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <FileText className="h-5 w-5 text-primary" />
+      <div className="flex-1 overflow-y-auto">
+        {notifications.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+            <CheckCircle className="h-8 w-8 text-muted-foreground/30 mb-2" />
+            <p className="text-sm text-muted-foreground">All caught up!</p>
+          </div>
+        ) : (
+          <div className="divide-y">
+            {notifications.map((n) => (
+              <div
+                key={n.id}
+                className={`p-3.5 hover:bg-muted/30 transition-colors ${n.read ? 'opacity-60' : 'bg-primary/5'}`}
+              >
+                <div className="flex gap-3">
+                  <div className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${n.read ? 'bg-transparent' : 'bg-primary'}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start gap-1.5 mb-0.5">
+                      {TYPE_ICON[n.type] || TYPE_ICON.SYSTEM}
+                      <p className="text-sm font-medium leading-snug">{n.message}</p>
                     </div>
-                    <div>
-                      <h4 className="font-semibold text-sm">Comprehensive Metabolic Panel</h4>
-                      <p className="text-xs text-muted-foreground mb-2">Uploaded on Mar 28, 2026</p>
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/10">
-                          High Glucose
-                        </span>
-                        <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                          Normal Liver Function
-                        </span>
-                      </div>
-                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      {n.time ? format(new Date(n.time), 'hh:mm a') : ''}
+                    </p>
                   </div>
-                  <Link to="/reports">
-                    <Button variant="ghost" size="sm">View</Button>
-                  </Link>
-                </div>
-                
-                <div className="flex justify-center pt-2">
-                  <Link to="/reports">
-                    <Button variant="outline" className="w-full sm:w-auto">View All Reports</Button>
-                  </Link>
+                  {!n.read && (
+                    <button
+                      onClick={() => markRead(n.id)}
+                      className="text-[11px] font-medium text-primary hover:underline shrink-0"
+                    >
+                      Mark read
+                    </button>
+                  )}
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
 
-        {/* Sidebar area */}
-        <div className="space-y-8">
-          <Card className="h-full max-h-[500px] flex flex-col">
-            <CardHeader className="pb-3 border-b">
+// ── Main Dashboard ────────────────────────────────────────────────────────────
+export function Dashboard() {
+  const { user }      = useAuthStore();
+  const { takenToday, pendingCount } = useMedicineStore();
+
+  // Connect socket (registers notification handlers)
+  useSocket();
+
+  const isDoctor = user?.role === 'doctor';
+
+  // ── Queries ─────────────────────────────────────────────────────────────────
+  const { data: reportsRes, isLoading: loadingReports, isError: isReportsError } = useQuery({
+    queryKey: ['reports'],
+    queryFn:  () => reportApi.getAll({ page: 1, limit: 5 }).then((r) => r.data),
+  });
+
+  const { data: aptRes, isLoading: loadingApt, isError: isAptError } = useQuery({
+    queryKey: ['appointments'],
+    queryFn:  () => appointmentApi.getAll().then((r) => r.data),
+  });
+
+  const { data: scheduleRes, isError: isScheduleError } = useQuery({
+    queryKey: ['todaySchedule'],
+    queryFn:  () => medicineApi.getTodaySchedule().then((r) => r.data),
+    enabled:  !isDoctor,
+  });
+
+  // ── Derived data ─────────────────────────────────────────────────────────────
+  // Safe extraction with default empty arrays to prevent crashes on bad API responses
+  const extractArray = (res, fallbackField) => {
+    if (!res) return [];
+    if (Array.isArray(res)) return res;
+    if (res.data && Array.isArray(res.data)) return res.data;
+    if (fallbackField && res[fallbackField] && Array.isArray(res[fallbackField])) return res[fallbackField];
+    if (fallbackField && res.data?.[fallbackField] && Array.isArray(res.data[fallbackField])) return res.data[fallbackField];
+    return [];
+  };
+
+  const reports      = isReportsError  ? [] : extractArray(reportsRes, 'reports');
+  const appointments = isAptError      ? [] : extractArray(aptRes);
+  const schedule     = isScheduleError ? [] : extractArray(scheduleRes);
+
+  const upcomingApts = appointments.filter((a) =>
+    ['scheduled', 'rescheduled'].includes(a?.status)
+  );
+
+  const takenCount    = schedule.filter((i) => i.status === 'taken').length;
+  const totalCount    = schedule.length;
+
+  // Latest report risk score
+  const latestReport  = reports[0];
+  const riskScore     = latestReport?.risk_score ?? null;
+  const healthScore   = riskScore != null ? Math.max(0, 100 - riskScore) : null;
+
+  return (
+    <div className="space-y-8 max-w-6xl mx-auto">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">
+          Hello, <span className="text-primary">{user?.name?.split(' ')[0] || 'there'}</span> 👋
+        </h1>
+        <p className="text-muted-foreground mt-1">
+          {format(new Date(), 'EEEE, MMMM do, yyyy')}
+        </p>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Health Score"
+          value={healthScore != null ? healthScore : '—'}
+          suffix={healthScore != null ? '/100' : ''}
+          sub={healthScore == null ? 'Upload a report to calculate' : undefined}
+          trend={healthScore != null && healthScore >= 70 ? 'Good standing' : undefined}
+          icon={Activity}
+          iconBg="bg-primary/10"
+          iconColor="text-primary"
+        />
+
+        <StatCard
+          title={isDoctor ? 'Patient Visits' : 'Reports Uploaded'}
+          value={isDoctor ? upcomingApts.length : (reportsRes?.total ?? reports.length)}
+          sub={
+            isDoctor
+              ? `${upcomingApts.length} upcoming`
+              : latestReport
+              ? `Latest: ${latestReport.report_type?.replace('_', ' ')} · ${format(new Date(latestReport.report_date), 'MMM d')}`
+              : 'No reports yet'
+          }
+          icon={FileText}
+          iconBg="bg-blue-500/10"
+          iconColor="text-blue-500"
+        />
+
+        <StatCard
+          title="Upcoming Appointments"
+          value={upcomingApts.length}
+          sub={
+            upcomingApts.length > 0
+              ? `Next: ${format(new Date(upcomingApts[0].scheduled_at), 'MMM d, hh:mm a')}`
+              : 'None scheduled'
+          }
+          icon={CalendarCheck}
+          iconBg="bg-amber-500/10"
+          iconColor="text-amber-500"
+        />
+
+        {!isDoctor && (
+          <StatCard
+            title="Today's Medicines"
+            value={takenCount}
+            suffix={totalCount > 0 ? `/${totalCount}` : ''}
+            sub={
+              totalCount === 0
+                ? 'No medicines today'
+                : pendingCount() > 0
+                ? `${pendingCount()} dose(s) pending`
+                : 'All doses logged!'
+            }
+            icon={Pill}
+            iconBg="bg-purple-500/10"
+            iconColor="text-purple-500"
+          />
+        )}
+
+        {isDoctor && (
+          <StatCard
+            title="Total Patients"
+            value={appointments.length}
+            sub="Across all appointments"
+            icon={Stethoscope}
+            iconBg="bg-purple-500/10"
+            iconColor="text-purple-500"
+          />
+        )}
+      </div>
+
+      {/* Main content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Content: 2/3 */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Recent reports */}
+          <Card>
+            <CardHeader className="border-b pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Bell className="h-5 w-5 text-muted-foreground" />
-                  Notifications
-                </CardTitle>
-                {unreadCount > 0 && (
-                  <span className="bg-primary text-primary-foreground text-xs px-2 py-0.5 rounded-full font-medium">
-                    {unreadCount} new
-                  </span>
-                )}
+                <div>
+                  <CardTitle>Recent Reports</CardTitle>
+                  <CardDescription>AI analysis from your latest uploads</CardDescription>
+                </div>
+                <Link to="/reports">
+                  <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                    View all <ArrowRight className="h-3 w-3" />
+                  </Button>
+                </Link>
               </div>
             </CardHeader>
-            <CardContent className="flex-1 overflow-y-auto p-0">
-              {notifications.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground text-sm">
-                  You're all caught up!
+            <CardContent className="pt-4">
+              {loadingReports ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-16" /><Skeleton className="h-16" />
+                </div>
+              ) : reports.length === 0 ? (
+                <div className="text-center py-8">
+                  <FileText className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No reports yet.</p>
+                  <Link to="/reports">
+                    <Button size="sm" variant="outline" className="mt-3">Upload Report</Button>
+                  </Link>
                 </div>
               ) : (
-                <div className="divide-y">
-                  {notifications.map(n => (
-                    <div 
-                      key={n.id} 
-                      className={`p-4 hover:bg-muted/30 transition-colors ${n.read ? 'opacity-60' : 'bg-primary/5'}`}
-                    >
-                      <div className="flex gap-3">
-                        <div className={`mt-1 h-2 w-2 rounded-full shrink-0 ${n.read ? 'bg-transparent' : 'bg-primary'}`} />
-                        <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none mb-1">{n.text}</p>
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                            {n.type}
+                <div className="space-y-3">
+                  {reports.slice(0, 3).map((r) => (
+                    <div key={r._id} className="flex items-center justify-between p-3 border rounded-xl hover:bg-muted/30 transition-colors">
+                      <div className="flex gap-3 items-center">
+                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <FileText className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm capitalize">{r.report_type?.replace('_', ' ') || 'Lab Report'}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {format(new Date(r.report_date), 'MMM dd, yyyy')}
                           </p>
                         </div>
-                        {!n.read && (
-                          <button 
-                            onClick={() => markAsRead(n.id)} 
-                            className="text-xs font-medium text-primary hover:underline shrink-0 h-fit"
-                          >
-                            Mark Read
-                          </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {r.risk_score != null && (
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                            r.risk_score >= 75 ? 'bg-red-50 text-red-600 border-red-200' :
+                            r.risk_score >= 50 ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                            'bg-emerald-50 text-emerald-600 border-emerald-200'
+                          }`}>
+                            Risk {r.risk_score}
+                          </span>
                         )}
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                          r.analysis_status === 'done'
+                            ? 'bg-primary/10 text-primary border-primary/20'
+                            : 'bg-muted text-muted-foreground border-border'
+                        }`}>
+                          {r.analysis_status === 'done' ? 'Analyzed' : 'Processing'}
+                        </span>
                       </div>
                     </div>
                   ))}
@@ -224,6 +337,118 @@ export function Dashboard() {
               )}
             </CardContent>
           </Card>
+
+          {/* Upcoming appointments */}
+          <Card>
+            <CardHeader className="border-b pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Upcoming Appointments</CardTitle>
+                  <CardDescription>Your scheduled visits</CardDescription>
+                </div>
+                <Link to="/appointments">
+                  <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                    Manage <ArrowRight className="h-3 w-3" />
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-4">
+              {loadingApt ? (
+                <Skeleton className="h-16" />
+              ) : upcomingApts.length === 0 ? (
+                <div className="text-center py-6">
+                  <CalendarCheck className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No upcoming appointments.</p>
+                  <Link to="/appointments">
+                    <Button size="sm" variant="outline" className="mt-3">Book Visit</Button>
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {upcomingApts.slice(0, 2).map((apt) => {
+                    const doc = apt.doctor || apt.doctor_id;
+                    return (
+                      <div key={apt._id} className="flex items-center justify-between p-3 border border-primary/20 bg-primary/5 rounded-xl">
+                        <div className="flex gap-3 items-center">
+                          <div className="h-9 w-9 rounded-full bg-background border flex items-center justify-center shrink-0">
+                            <Stethoscope className="h-4 w-4 text-primary/60" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm">
+                              {isDoctor
+                                ? (apt.user_id?.name || 'Patient')
+                                : `Dr. ${doc?.name || '—'}`}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {!isDoctor && doc?.specialisation}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-semibold text-primary">
+                            {format(new Date(apt.scheduled_at), 'MMM dd')}
+                          </p>
+                          <p className="text-xs text-muted-foreground font-mono">
+                            {format(new Date(apt.scheduled_at), 'hh:mm a')}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Today's medicine schedule (patient only) */}
+          {!isDoctor && schedule.length > 0 && (
+            <Card>
+              <CardHeader className="border-b pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle>Today's Medicines</CardTitle>
+                  <Link to="/medicines">
+                    <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                      Full schedule <ArrowRight className="h-3 w-3" />
+                    </Button>
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4">
+                <div className="space-y-2">
+                  {schedule.slice(0, 4).map((item, i) => (
+                    <div key={i} className={`flex items-center justify-between p-2.5 rounded-lg border text-sm ${
+                      item.status === 'taken' ? 'opacity-60' : ''
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        <Pill className="h-4 w-4 text-primary/60" />
+                        <span className="font-medium">{item.medicine.name}</span>
+                        <span className="text-muted-foreground text-xs">{item.medicine.dosage}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-muted-foreground">
+                          {format(new Date(item.scheduled_at), 'hh:mm a')}
+                        </span>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                          item.status === 'taken'   ? 'bg-emerald-50 text-emerald-600 border-emerald-200' :
+                          item.status === 'missed'  ? 'bg-red-50 text-red-600 border-red-200' :
+                          item.status === 'skipped' ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                          'bg-muted text-muted-foreground border-border'
+                        }`}>
+                          {item.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Sidebar: notifications 1/3 */}
+        <div>
+          <NotificationPanel />
         </div>
       </div>
     </div>

@@ -67,9 +67,9 @@ export function Home() {
           </div>
           
           <div className="container mx-auto px-4 text-center">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mx-auto max-w-3xl">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="mx-auto max-w-4xl">
               <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-6xl text-balance">
-                Your Intelligent Healthcare <span className="text-primary">Operating System</span>
+                AI-Powered Intelligent Healthcare <span className="text-primary">Management System</span>
               </h1>
               <p className="mt-6 text-lg leading-8 text-muted-foreground max-w-2xl mx-auto">
                 BioPulse digitizes your lab reports, provides detailed AI health insights, generates custom diet plans, and connects you with the right specialists instantly.

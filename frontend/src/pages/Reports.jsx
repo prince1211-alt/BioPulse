@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Upload, FileText, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import {
+  Upload, FileText, AlertTriangle, CheckCircle, Clock,
+  RefreshCw, Trash2, ChevronDown, ChevronUp, Activity,
+  Shield, Utensils, Dumbbell, Stethoscope,
+} from 'lucide-react';
 import { toast } from 'sonner';
-
 import { reportApi } from '../api/report.api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -11,237 +14,489 @@ import { Label } from '../components/ui/Label';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/Card';
 import { Skeleton } from '../components/ui/Skeleton';
 
+const VALID_REPORT_TYPES = [
+  { value: 'blood_test',   label: 'Blood Test' },
+  { value: 'lipid_panel',  label: 'Lipid Panel' },
+  { value: 'diabetes',     label: 'Diabetes / HbA1c' },
+  { value: 'thyroid',      label: 'Thyroid' },
+  { value: 'urine',        label: 'Urine Analysis' },
+  { value: 'xray',         label: 'X-Ray' },
+  { value: 'mri',          label: 'MRI' },
+  { value: 'other',        label: 'Other' },
+];
+
+const URGENCY_COLORS = {
+  routine:   'bg-emerald-50 text-emerald-700 border-emerald-200',
+  soon:      'bg-amber-50 text-amber-700 border-amber-200',
+  urgent:    'bg-orange-50 text-orange-700 border-orange-200',
+  emergency: 'bg-red-50 text-red-700 border-red-200',
+};
+
+const STATUS_COLORS = {
+  normal:     'bg-emerald-50 text-emerald-700 border-emerald-200',
+  borderline: 'bg-amber-50 text-amber-700 border-amber-200',
+  abnormal:   'bg-orange-50 text-orange-700 border-orange-200',
+  critical:   'bg-red-50 text-red-700 border-red-200',
+};
+
+// ── Polling hook: refetch a single report until analysis is done ──────────────
+function useReportPolling(reportId, enabled) {
+  return useQuery({
+    queryKey: ['reportStatus', reportId],
+    queryFn:  () => reportApi.getStatus(reportId).then((r) => r.data),
+    enabled:  !!reportId && enabled,
+    refetchInterval: (data) => (data?.ready ? false : 4000),
+  });
+}
+
+// ── Expandable report card ────────────────────────────────────────────────────
+function ReportCard({ report, onDelete, onReanalyze }) {
+  const [expanded, setExpanded] = useState(false);
+  const queryClient = useQueryClient();
+
+  const analysisIncomplete = report.analysis_status !== 'done';
+
+  // Poll until done
+  const { data: statusData } = useReportPolling(report._id, analysisIncomplete);
+
+  // When polling detects completion, refresh the reports list
+  useEffect(() => {
+    if (statusData?.ready) {
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    }
+  }, [statusData?.ready]);
+
+  // Merge live status data over stale list data
+  const liveReport = { ...report, ...statusData };
+
+  // ai_insights is a parsed object (set by worker); ai_summary is raw string fallback
+  const insights =
+    typeof liveReport.ai_insights === 'object' && liveReport.ai_insights
+      ? liveReport.ai_insights
+      : null;
+
+  const riskColor =
+    liveReport.risk_label === 'critical' ? 'text-red-600' :
+    liveReport.risk_label === 'high'     ? 'text-orange-600' :
+    liveReport.risk_label === 'moderate' ? 'text-amber-600' :
+    'text-emerald-600';
+
+  return (
+    <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow border-border/60">
+      {/* Header */}
+      <CardHeader className="bg-muted/30 pb-4 border-b">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-background rounded-lg shadow-sm border shrink-0">
+              <FileText className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-base">
+                {VALID_REPORT_TYPES.find((t) => t.value === liveReport.report_type)?.label ||
+                  liveReport.report_type || 'Lab Report'}
+              </CardTitle>
+              <CardDescription className="text-xs">
+                {format(new Date(liveReport.report_date || Date.now()), 'MMMM dd, yyyy')}
+              </CardDescription>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* OCR badge */}
+            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 border ${
+              liveReport.ocr_status === 'done'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-blue-50 text-blue-600 border-blue-200'
+            }`}>
+              {liveReport.ocr_status === 'done'
+                ? <CheckCircle className="h-3 w-3" />
+                : <Clock className="h-3 w-3 animate-pulse" />}
+              OCR {liveReport.ocr_status === 'done' ? 'Done' : 'Processing'}
+            </span>
+
+            {/* AI badge */}
+            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 border ${
+              liveReport.analysis_status === 'done'
+                ? 'bg-primary/10 text-primary border-primary/20'
+                : liveReport.analysis_status === 'failed'
+                ? 'bg-red-50 text-red-600 border-red-200'
+                : 'bg-amber-50 text-amber-600 border-amber-200'
+            }`}>
+              {liveReport.analysis_status === 'done'
+                ? <CheckCircle className="h-3 w-3" />
+                : liveReport.analysis_status === 'failed'
+                ? <AlertTriangle className="h-3 w-3" />
+                : <Clock className="h-3 w-3 animate-pulse" />}
+              AI {liveReport.analysis_status === 'done' ? 'Analyzed'
+                : liveReport.analysis_status === 'failed' ? 'Failed'
+                : 'Analyzing'}
+            </span>
+
+            {/* Risk score */}
+            {liveReport.risk_score != null && (
+              <span className={`px-2 py-0.5 rounded-full text-xs font-bold border bg-background ${riskColor}`}>
+                Risk {liveReport.risk_score}/100
+              </span>
+            )}
+
+            {/* Actions */}
+            <button
+              onClick={() => onReanalyze(liveReport._id)}
+              title="Re-run AI analysis"
+              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => onDelete(liveReport._id)}
+              title="Delete report"
+              className="p-1.5 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="pt-5 pb-4">
+        {/* Analyzing spinner */}
+        {liveReport.analysis_status !== 'done' && liveReport.analysis_status !== 'failed' && (
+          <div className="text-center py-6">
+            <div className="inline-flex flex-col items-center gap-3">
+              <div className="h-8 w-8 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
+              <p className="text-sm text-muted-foreground font-medium">
+                {liveReport.ocr_status !== 'done'
+                  ? 'Extracting text from document…'
+                  : 'AI is analyzing your biomarkers…'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Failed state */}
+        {liveReport.analysis_status === 'failed' && (
+          <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Analysis failed. Click the refresh icon to retry.
+          </div>
+        )}
+
+        {/* Analysis results */}
+        {liveReport.analysis_status === 'done' && insights && (
+          <div className="space-y-5">
+            {/* Summary */}
+            {insights.summary && (
+              <div className="bg-secondary/20 border rounded-lg p-4 text-sm leading-relaxed text-foreground/90">
+                {insights.summary}
+              </div>
+            )}
+
+            {/* Urgency banner */}
+            {insights.urgency?.level && insights.urgency.level !== 'routine' && (
+              <div className={`flex items-start gap-3 rounded-lg p-3 border text-sm font-medium ${URGENCY_COLORS[insights.urgency.level] || URGENCY_COLORS.routine}`}>
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div>
+                  <span className="capitalize font-bold">{insights.urgency.level}: </span>
+                  {insights.urgency.reason}
+                </div>
+              </div>
+            )}
+
+            {/* Key findings */}
+            {insights.key_findings?.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
+                  <Activity className="h-3.5 w-3.5" /> Key Findings
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {insights.key_findings.map((f, i) => (
+                    <div key={i} className={`p-3 rounded-lg border text-sm ${STATUS_COLORS[f.status] || 'bg-background border-border'}`}>
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="font-semibold text-xs">{f.name}</span>
+                        <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-black/5">
+                          {f.status}
+                        </span>
+                      </div>
+                      <div className="font-bold text-lg">{f.value} <span className="text-xs font-normal opacity-70">{f.unit}</span></div>
+                      {f.reference_range && (
+                        <div className="text-[10px] opacity-60 mt-0.5">Ref: {f.reference_range}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Expand toggle */}
+            <button
+              onClick={() => setExpanded((e) => !e)}
+              className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+            >
+              {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {expanded ? 'Show less' : 'Show full analysis'}
+            </button>
+
+            {expanded && (
+              <div className="space-y-4 pt-2 border-t">
+                {/* Risks */}
+                {insights.risks?.length > 0 && (
+                  <Section icon={<Shield className="h-3.5 w-3.5" />} title="Identified Risks">
+                    <ul className="space-y-1">
+                      {insights.risks.map((r, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <span className="text-red-400 mt-0.5">•</span> {r}
+                        </li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+
+                {/* Diet recommendations */}
+                {insights.diet_recommendations?.length > 0 && (
+                  <Section icon={<Utensils className="h-3.5 w-3.5" />} title="Diet Recommendations">
+                    <ul className="space-y-1">
+                      {insights.diet_recommendations.map((d, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <span className="text-emerald-400 mt-0.5">•</span> {d}
+                        </li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+
+                {/* Exercise */}
+                {insights.exercise_recommendations?.plan?.length > 0 && (
+                  <Section icon={<Dumbbell className="h-3.5 w-3.5" />} title={`Exercise — ${insights.exercise_recommendations.weekly_minutes} min/week`}>
+                    <ul className="space-y-1">
+                      {insights.exercise_recommendations.plan.map((e, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <span className="text-blue-400 mt-0.5">•</span> {e}
+                        </li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+
+                {/* Doctor recommendations */}
+                {insights.doctor_recommendations?.length > 0 && (
+                  <Section icon={<Stethoscope className="h-3.5 w-3.5" />} title="Doctor Recommendations">
+                    <ul className="space-y-1">
+                      {insights.doctor_recommendations.map((d, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <span className="text-primary/60 mt-0.5">•</span> {d}
+                        </li>
+                      ))}
+                    </ul>
+                  </Section>
+                )}
+
+                {/* Disclaimer */}
+                {insights.disclaimer && (
+                  <p className="text-[11px] text-muted-foreground border-t pt-3 italic">{insights.disclaimer}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Fallback: raw ai_summary string (backward compat) */}
+        {liveReport.analysis_status === 'done' && !insights && liveReport.ai_summary && (
+          <div className="bg-secondary/20 border rounded-lg p-4 text-sm leading-relaxed">
+            {liveReport.ai_summary}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Section({ icon, title, children }) {
+  return (
+    <div>
+      <h5 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+        {icon} {title}
+      </h5>
+      {children}
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export function ReportsPage() {
   const queryClient = useQueryClient();
-  const [file, setFile] = useState(null);
-  const [reportType, setReportType] = useState('Blood Test');
+  const [file,       setFile]       = useState(null);
+  const [reportType, setReportType] = useState('blood_test');
 
-  const { data: reportsData, isLoading } = useQuery({
+  const { data: reportsRes, isLoading, isError: isReportsError } = useQuery({
     queryKey: ['reports'],
-    queryFn: reportApi.getAll,
-    refetchInterval: 10000, 
+    queryFn:  () => reportApi.getAll().then((r) => r.data),
   });
 
+  const extractArray = (res, fallbackField) => {
+    if (!res) return [];
+    if (Array.isArray(res)) return res;
+    if (res.data && Array.isArray(res.data)) return res.data;
+    if (fallbackField && res[fallbackField] && Array.isArray(res[fallbackField])) return res[fallbackField];
+    if (fallbackField && res.data?.[fallbackField] && Array.isArray(res.data[fallbackField])) return res.data[fallbackField];
+    return [];
+  };
+
+  const reports = isReportsError ? [] : extractArray(reportsRes, 'reports');
+
+  // ── Upload mutation ─────────────────────────────────────────────────────────
   const uploadMutation = useMutation({
     mutationFn: async () => {
-      if (!file) throw new Error("No file selected");
-      
-      // 1. Get presigned URL or upload config
-      const res = await reportApi.getUploadUrl({
-        filename: file.name,
-        contentType: file.type
-      });
-      // Handle the case where the server wraps the response in a 'data' object
-      const data = res.data || res;
+      if (!file) throw new Error('No file selected');
 
-      // 2. Upload to S3 (Mocking fetch PUT for S3)
-      if (data.uploadUrl) {
-        await fetch(data.uploadUrl, {
-          method: 'PUT',
-          body: file,
-          headers: {
-            'Content-Type': file.type
-          }
-        });
-      }
-
-      // 3. Register report
-      return reportApi.create({
-        file_url: data.fileUrl || 'mock_url',
-        file_type: file.type,
-        report_type: reportType || 'General Lab Report',
-        report_date: new Date().toISOString()
+      // 1. Get presigned S3 URL
+      const { data: urlData } = await reportApi.getUploadUrl({
+        filename:    file.name,
+        contentType: file.type,
       });
+      const { uploadUrl, fileUrl } = urlData.data || urlData;
+
+      // 2. Upload file directly to S3
+      const s3Res = await fetch(uploadUrl, {
+        method:  'PUT',
+        body:    file,
+        headers: { 'Content-Type': file.type },
+      });
+      if (!s3Res.ok) throw new Error('S3 upload failed');
+
+      // 3. Register report in backend — include content_type so OCR knows file format
+      const { data: created } = await reportApi.create({
+        file_url:    fileUrl,
+        content_type: file.type,
+        report_type: reportType,
+        report_date: new Date().toISOString(),
+      });
+
+      return created;
     },
     onSuccess: () => {
       setFile(null);
-      setReportType('Blood Test');
-      // Reset file input element
-      const fileInput = document.getElementById('report-file');
-      if (fileInput) fileInput.value = '';
-      
-      toast.success('Report uploaded successfully! AI is analyzing...');
+      setReportType('blood_test');
+      const el = document.getElementById('report-file');
+      if (el) el.value = '';
+      toast.success('Report uploaded! AI analysis starting…');
       queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
-    onError: (err) => {
-      toast.error(err.message || 'Failed to upload report');
-    }
+    onError: (err) => toast.error(err.message || 'Upload failed'),
   });
 
-  const handleUpload = (e) => {
-    e.preventDefault();
-    if (file) {
-      uploadMutation.mutate();
+  // ── Reanalyze mutation ──────────────────────────────────────────────────────
+  const reanalyzeMutation = useMutation({
+    mutationFn: (id) => reportApi.reanalyze(id),
+    onSuccess: () => {
+      toast.success('Re-analysis triggered');
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+    onError: (err) => toast.error(err.message || 'Failed to reanalyze'),
+  });
+
+  // ── Delete mutation ─────────────────────────────────────────────────────────
+  const deleteMutation = useMutation({
+    mutationFn: (id) => reportApi.delete(id),
+    onSuccess: () => {
+      toast.success('Report deleted');
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+    onError: (err) => toast.error(err.message || 'Failed to delete'),
+  });
+
+  const handleDelete = (id) => {
+    if (window.confirm('Delete this report? This cannot be undone.')) {
+      deleteMutation.mutate(id);
     }
   };
 
-  const reports = reportsData?.data || reportsData || [];
-
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto">
+    <div className="space-y-8 max-w-5xl mx-auto">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Health Reports</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Health Reports</h1>
         <p className="text-muted-foreground mt-1">
-          Upload and analyze your medical lab reports using BioPulse AI.
+          Upload medical reports — BioPulse AI extracts and analyzes every biomarker automatically.
         </p>
       </div>
 
-      <Card className="shadow-soft border-primary/20">
+      {/* Upload card */}
+      <Card className="border-primary/20">
         <CardHeader className="bg-primary/5 border-b pb-4">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Upload className="h-5 w-5 text-primary" />
-            Upload New Report
+          <CardTitle className="text-base flex items-center gap-2">
+            <Upload className="h-4 w-4 text-primary" /> Upload New Report
           </CardTitle>
-          <CardDescription>
-            Supported formats: PDF, JPG, PNG. Max size: 10MB.
-          </CardDescription>
+          <CardDescription>PDF, JPG or PNG · Max 20 MB</CardDescription>
         </CardHeader>
-        <CardContent className="pt-6">
-          <form onSubmit={handleUpload} className="flex flex-col md:flex-row gap-6 items-end">
-            <div className="space-y-2 flex-1 w-full">
-              <Label htmlFor="report-file">Select File</Label>
-              <Input 
-                id="report-file" 
-                type="file" 
-                className="cursor-pointer file:bg-primary/10 file:text-primary file:border-0 hover:file:bg-primary/20"
-                onChange={e => setFile(e.target.files?.[0] || null)} 
+        <CardContent className="pt-5">
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (file) uploadMutation.mutate(); }}
+            className="flex flex-col md:flex-row gap-4 items-end"
+          >
+            <div className="space-y-1.5 flex-1">
+              <Label htmlFor="report-file">File</Label>
+              <Input
+                id="report-file"
+                type="file"
                 accept=".pdf,.jpg,.jpeg,.png"
                 required
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="cursor-pointer"
               />
             </div>
-            <div className="space-y-2 w-full md:w-1/3">
+            <div className="space-y-1.5 w-full md:w-52">
               <Label htmlFor="report-type">Report Type</Label>
-              <Input 
-                id="report-type" 
-                value={reportType} 
-                onChange={e => setReportType(e.target.value)} 
-                placeholder="e.g. Blood Test, MRI"
-                required
-              />
+              <select
+                id="report-type"
+                value={reportType}
+                onChange={(e) => setReportType(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {VALID_REPORT_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
             </div>
-            <Button 
-              type="submit" 
-              disabled={!file || uploadMutation.isPending} 
-              className="w-full md:w-auto min-w-[140px]"
+            <Button
+              type="submit"
+              disabled={!file || uploadMutation.isPending}
+              className="min-w-[120px]"
             >
-              {uploadMutation.isPending ? 'Uploading...' : 'Analyze'}
+              {uploadMutation.isPending ? (
+                <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Uploading…</>
+              ) : 'Upload & Analyze'}
             </Button>
           </form>
         </CardContent>
       </Card>
 
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold">Analysis Timeline</h2>
-        </div>
+      {/* Reports list */}
+      <div className="space-y-5">
+        <h2 className="text-xl font-bold">Analysis Timeline</h2>
 
         {isLoading ? (
           <div className="space-y-4">
-            <Skeleton className="h-[200px] w-full" />
-            <Skeleton className="h-[200px] w-full" />
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-40 w-full" />
           </div>
         ) : reports.length === 0 ? (
           <Card className="border-dashed bg-transparent shadow-none">
             <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-              <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                <FileText className="h-6 w-6 text-muted-foreground" />
-              </div>
-              <h3 className="font-semibold text-lg">No reports uploaded yet</h3>
-              <p className="text-muted-foreground text-sm max-w-sm mt-1">
-                Upload your first medical report above to get started with AI analysis and insights.
+              <FileText className="h-10 w-10 text-muted-foreground/40 mb-3" />
+              <h3 className="font-semibold">No reports yet</h3>
+              <p className="text-muted-foreground text-sm mt-1 max-w-xs">
+                Upload your first lab report to start getting AI-powered health insights.
               </p>
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-6">
-            {reports.map((report) => (
-              <Card key={report._id} className="overflow-hidden shadow-soft transition-shadow hover:shadow-md">
-                <CardHeader className="bg-muted/30 pb-4 border-b">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-background rounded-md shadow-sm border">
-                        <FileText className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-lg">{report.report_type || 'Lab Report'}</CardTitle>
-                        <CardDescription>{format(new Date(report.report_date || Date.now()), 'MMMM dd, yyyy')}</CardDescription>
-                      </div>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                      <div className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border ${
-                        report.ocr_status === 'done' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'
-                      }`}>
-                        {report.ocr_status === 'done' ? <CheckCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                        OCR {report.ocr_status === 'done' ? 'Complete' : 'Processing'}
-                      </div>
-                      <div className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border ${
-                        report.analysis_status === 'done' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-amber-50 text-amber-700 border-amber-200'
-                      }`}>
-                        {report.analysis_status === 'done' ? <CheckCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                        AI {report.analysis_status === 'done' ? 'Analyzed' : 'Analyzing'}
-                      </div>
-                    </div>
-                  </div>
-                </CardHeader>
-                
-                <CardContent className="pt-6">
-                  {report.analysis_status === 'Processing' && (
-                     <div className="text-center py-8">
-                       <div className="animate-pulse inline-flex flex-col items-center">
-                         <div className="h-10 w-10 rounded-full border-4 border-primary/30 border-t-primary animate-spin mb-4" />
-                         <p className="text-sm font-medium text-muted-foreground">AI is reading your document...</p>
-                       </div>
-                     </div>
-                  )}
-                  
-                  {report.analysis_status === 'done' && report.ai_summary && (
-                    <div className="space-y-6">
-                      <div className="bg-secondary/20 p-5 rounded-lg border text-sm leading-relaxed text-foreground/90">
-                        {report.ai_summary}
-                      </div>
-                      
-                      {report.ai_flags && report.ai_flags.length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-2">
-                            <AlertTriangle className="h-4 w-4" />
-                            Key Biomarkers
-                          </h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {report.ai_flags.map((flag, idx) => {
-                              const isOutOfRange = flag.status === 'high' || flag.status === 'low';
-                              return (
-                                <div key={idx} className={`p-3 border rounded-lg flex flex-col justify-between ${
-                                  isOutOfRange ? 'bg-destructive/5 border-destructive/20' : 'bg-background'
-                                }`}>
-                                  <div className="flex justify-between items-start mb-2">
-                                    <span className={`font-semibold text-sm ${isOutOfRange ? 'text-destructive' : 'text-foreground'}`}>
-                                      {flag.name}
-                                    </span>
-                                    <span className={`text-xs px-2 py-0.5 rounded uppercase font-bold tracking-wider ${
-                                      flag.status === 'high' ? 'bg-red-100 text-red-700' :
-                                      flag.status === 'low' ? 'bg-amber-100 text-amber-700' :
-                                      'bg-green-100 text-green-700'
-                                    }`}>
-                                      {flag.status}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-baseline gap-2">
-                                    <span className="text-xl font-bold">{flag.value}</span>
-                                    <span className="text-xs text-muted-foreground">Range: {flag.normal_range}</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          reports.map((report) => (
+            <ReportCard
+              key={report._id}
+              report={report}
+              onDelete={handleDelete}
+              onReanalyze={(id) => reanalyzeMutation.mutate(id)}
+            />
+          ))
         )}
       </div>
     </div>
