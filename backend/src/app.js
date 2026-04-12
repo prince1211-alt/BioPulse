@@ -28,9 +28,14 @@ app.use(
       // Allow requests with no origin (mobile apps, curl, Postman)
       if (!origin) return cb(null, true);
 
+      // Allow any localhost origin in development
+      if (env.NODE_ENV !== 'production' && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+        return cb(null, true);
+      }
+
       const allowed = Array.isArray(env.FRONTEND_URL)
         ? env.FRONTEND_URL
-        : [env.FRONTEND_URL];
+        : env.FRONTEND_URL.split(',').map(u => u.trim());
 
       if (allowed.includes(origin)) return cb(null, true);
 
@@ -38,7 +43,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-timezone'],
   })
 );
 
