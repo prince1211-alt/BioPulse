@@ -1,5 +1,11 @@
 import mongoose from 'mongoose';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezone from 'dayjs/plugin/timezone.js';
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
 import { Medicine, MedicineLog } from '../models/Medicine.js';
 import { medicineReminderQueue } from '../queues/index.js';
 import { success, error } from '../utils/response.js';
@@ -15,10 +21,13 @@ const parseTimeToCron = (time) => {
 
 const buildJobId = (medicineId, time) => `med-${medicineId}-${time}`;
 
-const getTodayRange = () => ({
-  start: dayjs().startOf('day').toDate(),
-  end:   dayjs().endOf('day').toDate(),
-});
+const getTodayRange = (tz) => {
+  const now = tz ? dayjs().tz(tz) : dayjs();
+  return {
+    start: now.startOf('day').toDate(),
+    end:   now.endOf('day').toDate(),
+  };
+};
 
 const removeJobsForMedicine = async (medicineId, times) => {
   const repeatableJobs = await medicineReminderQueue.getRepeatableJobs();
@@ -58,7 +67,7 @@ export const createMedicine = async (req, res) => {
   try {
     const { name, dosage, times, start_date, end_date, notes } = req.body;
 
-    if (!name || !dosage || !Array.isArray(times) || times.length === 0) {
+    if (!name || !dosage || !times || (Array.isArray(times) && times.length === 0)) {
       return error(res, 'INVALID_INPUT', 'name, dosage, and times[] are required', 400);
     }
 
@@ -236,7 +245,8 @@ export const logDose = async (req, res) => {
 
 export const getTodaySchedule = async (req, res) => {
   try {
-    const { start, end } = getTodayRange();
+    const tz = req.headers['x-timezone'];
+    const { start, end } = getTodayRange(tz);
 
     const [medicines, logs] = await Promise.all([
       Medicine.find({
@@ -256,12 +266,18 @@ export const getTodaySchedule = async (req, res) => {
       logMap.set(`${log.medicine_id}-${new Date(log.scheduled_at).getTime()}`, log);
     }
 
+    const baseDateStr = tz ? dayjs(start).tz(tz).format('YYYY-MM-DD') : dayjs(start).format('YYYY-MM-DD');
     const schedule = [];
     for (const med of medicines) {
       for (const time of med.times) {
-        const [h, m] = time.split(':').map(Number);
-        const scheduled = new Date(start);
-        scheduled.setHours(h, m, 0, 0);
+        let scheduled;
+        if (tz) {
+          scheduled = dayjs.tz(`${baseDateStr}T${time}:00`, tz).toDate();
+        } else {
+          const [h, m] = time.split(':').map(Number);
+          scheduled = new Date(start);
+          scheduled.setHours(h, m, 0, 0);
+        }
 
         const key = `${med._id}-${scheduled.getTime()}`;
         const log = logMap.get(key);
