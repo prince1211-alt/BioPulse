@@ -3,6 +3,7 @@ import { redisConnection } from '../config/redis.js';
 
 import { sendEmail, emailTemplates } from '../utils/email.js';
 import { sendPushNotification } from '../utils/fcm.js';
+import { aiAnalysisQueue } from '../queues/index.js';
 
 import { Medicine } from '../models/Medicine.js';
 import { Appointment } from '../models/Appointment.js';
@@ -384,7 +385,6 @@ export const startWorkers = () => {
         });
 
         // Hand off to AI analysis queue
-        const { aiAnalysisQueue } = await import('../queues/index.js');
         await aiAnalysisQueue.add(
           'analyze-report',
           { reportId: reportId.toString() },
@@ -561,13 +561,19 @@ export const startWorkers = () => {
     )
   );
 
-  // ─── Attach shared error handlers ────────────────────────────────────────
+  // ─── Attach shared event listeners ────────────────────────────────────────
   for (const worker of workers) {
     worker.on('failed', (job, err) => {
       console.error(`❌ [Worker:${worker.name}] job=${job?.id} failed:`, err.message);
     });
     worker.on('error', (err) => {
       console.error(`❌ [Worker:${worker.name}] error:`, err.message);
+    });
+    worker.on('active', (job) => {
+      console.log(`⏳ [Worker:${worker.name}] job=${job?.id} started`);
+    });
+    worker.on('completed', (job) => {
+      console.log(`✅ [Worker:${worker.name}] job=${job?.id} completed successfully`);
     });
   }
 
