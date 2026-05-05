@@ -1,4 +1,5 @@
 import { Worker } from 'bullmq';
+import sharp from 'sharp';
 import { redisConnection } from '../config/redis.js';
 
 import { sendEmail, emailTemplates } from '../utils/email.js';
@@ -284,8 +285,22 @@ export const startWorkers = () => {
             text = result.data.text;
           }
         } else {
-          const result = await Tesseract.recognize(buffer, 'eng', { logger: () => {} });
-          text = result.data.text;
+          // ─── Sharp Image Preprocessing Pipeline ────────────
+          try {
+            const preprocessedBuffer = await sharp(buffer)
+              .resize({ width: 2000, withoutEnlargement: true }) // Scale for OCR clarity
+              .grayscale() // Convert to grayscale
+              .normalize() // Stretch contrast (thresholding equivalent)
+              .median(3) // Noise reduction
+              .toBuffer();
+              
+            const result = await Tesseract.recognize(preprocessedBuffer, 'eng', { logger: () => {} });
+            text = result.data.text;
+          } catch (sharpErr) {
+            console.error(`[OCRWorker] Sharp preprocessing failed: ${sharpErr.message}, falling back to raw buffer`);
+            const result = await Tesseract.recognize(buffer, 'eng', { logger: () => {} });
+            text = result.data.text;
+          }
         }
 
         text = cleanText(text);
