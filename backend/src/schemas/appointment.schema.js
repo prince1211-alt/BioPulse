@@ -13,3 +13,19 @@ export const autoBookSchema = z.object({
   window_days: z.number().int().positive().max(30).optional().default(7),
   trigger_medicine_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID').optional(),
 });
+
+export const rescheduleSchema = z.object({
+  new_scheduled_at: z.string().datetime(),
+});
+
+export const updateStatusSchema = z.object({
+  status: z.enum(['completed', 'no_show']),
+});
+
+export const addSlotsSchema = z.object({
+  slots: z.array(z.string().datetime()).min(1, 'slots array is required'),
+});
+
+export const removeSlotSchema = z.object({
+  slot: z.string().datetime(),
+});

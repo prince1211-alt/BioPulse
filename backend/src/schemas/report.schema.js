@@ -1,14 +1,11 @@
 import { z } from 'zod';
 
-export const uploadUrlSchema = z.object({
-  filename: z.string().min(1),
-  contentType: z.string().min(1),
-});
+const VALID_REPORT_TYPES = ['blood_test', 'lipid_panel', 'diabetes', 'thyroid', 'urine', 'xray', 'mri', 'other'];
 
-export const createReportSchema = z.object({
-  file_url: z.string().url(),
-  content_type: z.string().min(1).optional(),
-  file_type: z.string().min(1).optional(),
-  report_type: z.string().min(1),
-  report_date: z.string().datetime().optional(),
+// Used for multipart/form-data upload validation (req.body fields from multer)
+export const uploadReportSchema = z.object({
+  report_type: z.enum(VALID_REPORT_TYPES, {
+    errorMap: () => ({ message: `report_type must be one of: ${VALID_REPORT_TYPES.join(', ')}` }),
+  }),
+  report_date: z.string().optional(),
 });
