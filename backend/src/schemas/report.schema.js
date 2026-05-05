@@ -7,7 +7,8 @@ export const uploadUrlSchema = z.object({
 
 export const createReportSchema = z.object({
   file_url: z.string().url(),
-  file_type: z.string().min(1),
+  content_type: z.string().min(1).optional(),
+  file_type: z.string().min(1).optional(),
   report_type: z.string().min(1),
   report_date: z.string().datetime().optional(),
 });
