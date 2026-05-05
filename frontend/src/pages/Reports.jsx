@@ -348,29 +348,12 @@ export function ReportsPage() {
     mutationFn: async () => {
       if (!file) throw new Error('No file selected');
 
-      // 1. Get presigned S3 URL
-      const { data: urlData } = await reportApi.getUploadUrl({
-        filename:    file.name,
-        contentType: file.type,
-      });
-      const { uploadUrl, fileUrl } = urlData.data || urlData;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('report_type', reportType);
+      formData.append('report_date', new Date().toISOString());
 
-      // 2. Upload file directly to S3
-      const s3Res = await fetch(uploadUrl, {
-        method:  'PUT',
-        body:    file,
-        headers: { 'Content-Type': file.type },
-      });
-      if (!s3Res.ok) throw new Error('S3 upload failed');
-
-      // 3. Register report in backend — include content_type so OCR knows file format
-      const { data: created } = await reportApi.create({
-        file_url:    fileUrl,
-        content_type: file.type,
-        report_type: reportType,
-        report_date: new Date().toISOString(),
-      });
-
+      const { data: created } = await reportApi.upload(formData);
       return created;
     },
     onSuccess: () => {

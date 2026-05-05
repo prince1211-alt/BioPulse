@@ -1,13 +1,11 @@
 import { api } from './axios.js';
 
 export const reportApi = {
-  // POST /reports/upload-url
-  // body: { filename, contentType }  → returns { uploadUrl, fileUrl, key }
-  getUploadUrl: (data) => api.post('/reports/upload-url', data),
-
-  // POST /reports
-  // body: { file_url, report_type, content_type, report_date? }
-  create: (data) => api.post('/reports', data),
+  // POST /reports/upload
+  // body: FormData (file, report_type, report_date)
+  upload: (formData) => api.post('/reports/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
 
   // GET /reports?page=1&limit=10&report_type=blood_test
   getAll: (params) => api.get('/reports', { params }),

@@ -1,21 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { Activity, Pill, CalendarCheck, FileText, Salad, LogOut, User } from 'lucide-react';
+import { Activity, Pill, CalendarCheck, FileText, Salad, LogOut, User, Loader2 } from 'lucide-react';
 
-import { useAuthStore }        from './stores/authStore';
+import { useAuthStore } from './stores/authStore';
 import { useNotificationStore } from './stores/notificationStore';
-import { authApi }             from './api/auth.api';
+import { authApi } from './api/auth.api';
 
-import { Dashboard }        from './pages/Dashboard';
-import { MedicinesPage }    from './pages/Medicines';
-import { AppointmentsPage } from './pages/Appointments';
-import { ReportsPage }      from './pages/Reports';
-import { DietPage }         from './pages/Diet';
-import { LoginPage }        from './pages/Login';
-import { SignupPage }        from './pages/Signup';
-import { Home }             from './pages/Home';
-import { ProfilePage }      from './pages/Profile';
+// Lazy loading pages
+const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const MedicinesPage = lazy(() => import('./pages/Medicines').then(m => ({ default: m.MedicinesPage })));
+const AppointmentsPage = lazy(() => import('./pages/Appointments').then(m => ({ default: m.AppointmentsPage })));
+const ReportsPage = lazy(() => import('./pages/Reports').then(m => ({ default: m.ReportsPage })));
+const DietPage = lazy(() => import('./pages/Diet').then(m => ({ default: m.DietPage })));
+const LoginPage = lazy(() => import('./pages/Login').then(m => ({ default: m.LoginPage })));
+const SignupPage = lazy(() => import('./pages/Signup').then(m => ({ default: m.SignupPage })));
+const Home = lazy(() => import('./pages/Home').then(m => ({ default: m.Home })));
+const ProfilePage = lazy(() => import('./pages/Profile').then(m => ({ default: m.ProfilePage })));
+
+const SuspenseFallback = () => (
+  <div className="flex items-center justify-center min-h-[50vh]">
+    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+  </div>
+);
 
 // ─── Nav items ────────────────────────────────────────────────────────────────
 
@@ -30,18 +37,17 @@ const NAV_ITEMS = [
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
 const Layout = ({ children }) => {
-  // ✅ Fix: use `clearAuth` (the correct store action) + call logout API
   const { user, clearAuth } = useAuthStore();
   const { clear: clearNotifications } = useNotificationStore();
 
   const handleLogout = async () => {
     try {
-      await authApi.logout(); // clears httpOnly refreshToken cookie on server
+      await authApi.logout();
     } catch {
-      // If the API call fails (e.g. already expired), still clear local state
+      // Ignored
     } finally {
-      clearAuth();             // clears accessToken from localStorage + zustand
-      clearNotifications();    // reset notification panel
+      clearAuth();
+      clearNotifications();
     }
   };
 
@@ -100,7 +106,6 @@ const Layout = ({ children }) => {
             <span className="font-bold text-primary">BioPulse</span>
           </div>
 
-          {/* Desktop: empty left side (breadcrumbs could go here) */}
           <div className="hidden md:block" />
 
           {/* Right side actions */}
@@ -130,9 +135,10 @@ const Layout = ({ children }) => {
         </header>
 
         {/* Page content */}
-        {/* pb-20 adds bottom padding on mobile so content isn't hidden behind bottom nav */}
         <main className="flex-1 p-4 md:p-8 overflow-y-auto pb-20 md:pb-8">
-          {children}
+          <Suspense fallback={<SuspenseFallback />}>
+            {children}
+          </Suspense>
         </main>
       </div>
 
@@ -169,9 +175,6 @@ const Layout = ({ children }) => {
 };
 
 // ─── Auth guard on app load ───────────────────────────────────────────────────
-// Verifies the stored token is still valid when the tab is reopened.
-// Shows nothing (not a redirect) while the check is in-flight so the page
-// doesn't flash to /login for a valid user.
 
 function AuthVerifier() {
   const { isLoggedIn, clearAuth, setUser } = useAuthStore();
@@ -197,7 +200,6 @@ function AuthVerifier() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // While verifying, render nothing — Routes stay suspended
   if (checking && isLoggedIn) return null;
 
   return null;
@@ -218,35 +220,25 @@ function App() {
       <Toaster richColors position="top-center" />
       <AuthVerifier />
 
-      <Routes>
-        {/* Public routes */}
-        <Route path="/"       element={<Home />} />
-        <Route path="/login"  element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
+      <Suspense fallback={<SuspenseFallback />}>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/"       element={<Home />} />
+          <Route path="/login"  element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
 
-        {/* Protected routes — all wrapped in Layout */}
-        <Route path="/dashboard" element={
-          <ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>
-        } />
-        <Route path="/medicines" element={
-          <ProtectedRoute><Layout><MedicinesPage /></Layout></ProtectedRoute>
-        } />
-        <Route path="/appointments" element={
-          <ProtectedRoute><Layout><AppointmentsPage /></Layout></ProtectedRoute>
-        } />
-        <Route path="/reports" element={
-          <ProtectedRoute><Layout><ReportsPage /></Layout></ProtectedRoute>
-        } />
-        <Route path="/diet" element={
-          <ProtectedRoute><Layout><DietPage /></Layout></ProtectedRoute>
-        } />
-        <Route path="/profile" element={
-          <ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>
-        } />
+          {/* Protected routes — all wrapped in Layout */}
+          <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
+          <Route path="/medicines" element={<ProtectedRoute><Layout><MedicinesPage /></Layout></ProtectedRoute>} />
+          <Route path="/appointments" element={<ProtectedRoute><Layout><AppointmentsPage /></Layout></ProtectedRoute>} />
+          <Route path="/reports" element={<ProtectedRoute><Layout><ReportsPage /></Layout></ProtectedRoute>} />
+          <Route path="/diet" element={<ProtectedRoute><Layout><DietPage /></Layout></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }
