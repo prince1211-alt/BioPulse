@@ -20,9 +20,13 @@ const appointmentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    notes: {
+      type: String,
+      default: '',
+    },
     status: {
       type: String,
-      enum: ['scheduled', 'confirmed', 'completed', 'cancelled'],
+      enum: ['scheduled', 'confirmed', 'rescheduled', 'completed', 'cancelled', 'no_show'],
       default: 'scheduled',
     },
     auto_booked: {
@@ -43,15 +47,12 @@ const doctorSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
     },
     specialisation: {
       type: String,
-      required: true,
     },
     hospital: {
       type: String,
-      required: true,
     },
     available_slots: {
       type: [Date],
