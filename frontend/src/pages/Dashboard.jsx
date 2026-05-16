@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { format, isToday, isYesterday } from 'date-fns';
 import {
   Activity, Pill, CalendarCheck, FileText,
   TrendingUp, Bell, AlertTriangle, CheckCircle,
@@ -15,6 +15,7 @@ import { useSocket }            from '../hooks/useSocket';
 import { reportApi }      from '../api/report.api';
 import { appointmentApi } from '../api/appointment.api';
 import { medicineApi }    from '../api/medicine.api';
+import { notificationApi } from '../api/auth.api';
 
 import {
   Card, CardHeader, CardTitle,
@@ -50,17 +51,51 @@ function StatCard({ title, value, suffix, sub, icon: Icon, iconBg, iconColor, tr
 }
 
 // ── Notification list ─────────────────────────────────────────────────────────
-function NotificationPanel() {
-  const { notifications, markRead, markAllRead, unreadCount } = useNotificationStore();
-  const count = unreadCount();
 
-  const TYPE_ICON = {
-    medicine:    <Pill className="h-3.5 w-3.5 text-purple-500" />,
-    appointment: <CalendarCheck className="h-3.5 w-3.5 text-blue-500" />,
-    report_ready:<FileText className="h-3.5 w-3.5 text-primary" />,
-    low_stock:   <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />,
-    SYSTEM:      <Bell className="h-3.5 w-3.5 text-muted-foreground" />,
-  };
+
+function formatTime(date) {
+  const d = new Date(date);
+  if (isToday(d))     return `Today ${format(d, 'h:mm a')}`;
+  if (isYesterday(d)) return `Yesterday ${format(d, 'h:mm a')}`;
+  return format(d, 'MMM d, h:mm a');
+}
+
+const TYPE_CONFIG = {
+  medicine:    { icon: Pill,          color: 'text-blue-500',   bg: 'bg-blue-50'   },
+  appointment: { icon: CalendarCheck, color: 'text-purple-500', bg: 'bg-purple-50' },
+  diet:        { icon: Activity,      color: 'text-green-500',  bg: 'bg-green-50'  }, // Salad icon not imported, fallback to Activity
+  report:      { icon: FileText,      color: 'text-indigo-500', bg: 'bg-indigo-50' },
+  low_stock:   { icon: AlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50' },
+  system:      { icon: Bell,          color: 'text-gray-500',   bg: 'bg-gray-50'   },
+};
+
+function NotificationPanel() {
+  const queryClient = useQueryClient();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['notifications'],
+    queryFn:  async () => {
+      const res = await notificationApi.getAll();
+      return res.data?.data || [];
+    },
+    refetchInterval: 30_000,
+  });
+
+  const { mutate: markRead } = useMutation({
+    mutationFn: (id) => notificationApi.markRead(id),
+    onSuccess:  () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+
+  const { mutate: markAllRead } = useMutation({
+    mutationFn: async () => {
+      const unread = (data || []).filter(n => !n.is_read);
+      await Promise.all(unread.map(n => notificationApi.markRead(n._id)));
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+
+  const notifications = data || [];
+  const unreadCount   = notifications.filter((n) => !n.is_read).length;
 
   return (
     <Card className="flex flex-col h-full max-h-[480px]">
@@ -70,13 +105,13 @@ function NotificationPanel() {
             <Bell className="h-4 w-4 text-muted-foreground" /> Notifications
           </CardTitle>
           <div className="flex items-center gap-2">
-            {count > 0 && (
+            {unreadCount > 0 && (
               <>
                 <span className="bg-primary text-primary-foreground text-xs px-2 py-0.5 rounded-full font-semibold">
-                  {count}
+                  {unreadCount}
                 </span>
                 <button
-                  onClick={markAllRead}
+                  onClick={() => markAllRead()}
                   className="text-[11px] text-muted-foreground hover:text-foreground"
                 >
                   Clear all
@@ -88,40 +123,54 @@ function NotificationPanel() {
       </CardHeader>
 
       <div className="flex-1 overflow-y-auto">
-        {notifications.length === 0 ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full p-6">
+            <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+          </div>
+        ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full p-6 text-center">
             <CheckCircle className="h-8 w-8 text-muted-foreground/30 mb-2" />
             <p className="text-sm text-muted-foreground">All caught up!</p>
           </div>
         ) : (
           <div className="divide-y">
-            {notifications.map((n) => (
-              <div
-                key={n.id}
-                className={`p-3.5 hover:bg-muted/30 transition-colors ${n.read ? 'opacity-60' : 'bg-primary/5'}`}
-              >
-                <div className="flex gap-3">
-                  <div className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${n.read ? 'bg-transparent' : 'bg-primary'}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-1.5 mb-0.5">
-                      {TYPE_ICON[n.type] || TYPE_ICON.SYSTEM}
-                      <p className="text-sm font-medium leading-snug">{n.message}</p>
+            {notifications.map((n) => {
+              const { icon: Icon, color, bg } = TYPE_CONFIG[n.type] || TYPE_CONFIG.system;
+              
+              return (
+                <div
+                  key={n._id}
+                  className={`p-3.5 hover:bg-muted/30 transition-colors ${n.is_read ? 'opacity-60' : 'bg-primary/5'}`}
+                >
+                  <div className="flex gap-3">
+                    <div className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${n.is_read ? 'bg-transparent' : 'bg-primary'}`} />
+                    
+                    {/* Icon */}
+                    <div className={`w-7 h-7 rounded-full ${bg} flex items-center justify-center shrink-0`}>
+                      <Icon size={14} className={color} />
                     </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      {n.time ? format(new Date(n.time), 'hh:mm a') : ''}
-                    </p>
+
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm leading-snug ${n.is_read ? 'text-muted-foreground' : 'font-medium text-foreground'}`}>
+                        {n.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-1">
+                        {formatTime(n.createdAt)}
+                      </p>
+                    </div>
+                    {!n.is_read && (
+                      <button
+                        onClick={() => markRead(n._id)}
+                        className="text-[11px] font-medium text-primary hover:underline shrink-0"
+                      >
+                        Mark read
+                      </button>
+                    )}
                   </div>
-                  {!n.read && (
-                    <button
-                      onClick={() => markRead(n.id)}
-                      className="text-[11px] font-medium text-primary hover:underline shrink-0"
-                    >
-                      Mark read
-                    </button>
-                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -197,23 +246,25 @@ export function Dashboard() {
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Health Score"
-          value={healthScore != null ? healthScore : '—'}
-          suffix={healthScore != null ? '/100' : ''}
-          sub={healthScore == null ? 'Upload a report to calculate' : undefined}
-          trend={healthScore != null && healthScore >= 70 ? 'Good standing' : undefined}
-          icon={Activity}
-          iconBg="bg-primary/10"
-          iconColor="text-primary"
-        />
+        {!isDoctor && (
+          <StatCard
+            title="Health Score"
+            value={healthScore != null ? healthScore : '—'}
+            suffix={healthScore != null ? '/100' : ''}
+            sub={healthScore == null ? 'Upload a report to calculate' : undefined}
+            trend={healthScore != null && healthScore >= 70 ? 'Good standing' : undefined}
+            icon={Activity}
+            iconBg="bg-primary/10"
+            iconColor="text-primary"
+          />
+        )}
 
         <StatCard
-          title={isDoctor ? 'Patient Visits' : 'Reports Uploaded'}
-          value={isDoctor ? upcomingApts.length : (reportsRes?.total ?? reports.length)}
+          title={isDoctor ? 'Today\'s Appointments' : 'Reports Uploaded'}
+          value={isDoctor ? upcomingApts.filter(a => format(new Date(a.scheduled_at), 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')).length : (reportsRes?.total ?? reports.length)}
           sub={
             isDoctor
-              ? `${upcomingApts.length} upcoming`
+              ? `${upcomingApts.length} total upcoming`
               : latestReport
               ? `Latest: ${latestReport.report_type?.replace('_', ' ')} · ${format(new Date(latestReport.report_date), 'MMM d')}`
               : 'No reports yet'
@@ -270,73 +321,127 @@ export function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Content: 2/3 */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Recent reports */}
-          <Card>
-            <CardHeader className="border-b pb-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Recent Reports</CardTitle>
-                  <CardDescription>AI analysis from your latest uploads</CardDescription>
-                </div>
-                <Link to="/reports">
-                  <Button variant="ghost" size="sm" className="gap-1 text-xs">
-                    View all <ArrowRight className="h-3 w-3" />
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-4">
-              {loadingReports ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-16" /><Skeleton className="h-16" />
-                </div>
-              ) : reports.length === 0 ? (
-                <div className="text-center py-8">
-                  <FileText className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No reports yet.</p>
+          {/* Recent reports / Patient List */}
+          {!isDoctor ? (
+            <Card>
+              <CardHeader className="border-b pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Recent Reports</CardTitle>
+                    <CardDescription>AI analysis from your latest uploads</CardDescription>
+                  </div>
                   <Link to="/reports">
-                    <Button size="sm" variant="outline" className="mt-3">Upload Report</Button>
+                    <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                      View all <ArrowRight className="h-3 w-3" />
+                    </Button>
                   </Link>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {reports.slice(0, 3).map((r) => (
-                    <div key={r._id} className="flex items-center justify-between p-3 border rounded-xl hover:bg-muted/30 transition-colors">
-                      <div className="flex gap-3 items-center">
-                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <FileText className="h-4 w-4 text-primary" />
+              </CardHeader>
+              <CardContent className="pt-4">
+                {loadingReports ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-16" /><Skeleton className="h-16" />
+                  </div>
+                ) : reports.length === 0 ? (
+                  <div className="text-center py-8">
+                    <FileText className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No reports yet.</p>
+                    <Link to="/reports">
+                      <Button size="sm" variant="outline" className="mt-3">Upload Report</Button>
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {reports.slice(0, 3).map((r) => (
+                      <div key={r._id} className="flex items-center justify-between p-3 border rounded-xl hover:bg-muted/30 transition-colors">
+                        <div className="flex gap-3 items-center">
+                          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <FileText className="h-4 w-4 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm capitalize">{r.report_type?.replace('_', ' ') || 'Lab Report'}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {format(new Date(r.report_date), 'MMM dd, yyyy')}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-semibold text-sm capitalize">{r.report_type?.replace('_', ' ') || 'Lab Report'}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(r.report_date), 'MMM dd, yyyy')}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {r.risk_score != null && (
-                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
-                            r.risk_score >= 75 ? 'bg-red-50 text-red-600 border-red-200' :
-                            r.risk_score >= 50 ? 'bg-amber-50 text-amber-600 border-amber-200' :
-                            'bg-emerald-50 text-emerald-600 border-emerald-200'
+                        <div className="flex items-center gap-2">
+                          {r.risk_score != null && (
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                              r.risk_score >= 75 ? 'bg-red-50 text-red-600 border-red-200' :
+                              r.risk_score >= 50 ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                              'bg-emerald-50 text-emerald-600 border-emerald-200'
+                            }`}>
+                              Risk {r.risk_score}
+                            </span>
+                          )}
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                            r.analysis_status === 'done'
+                              ? 'bg-primary/10 text-primary border-primary/20'
+                              : 'bg-muted text-muted-foreground border-border'
                           }`}>
-                            Risk {r.risk_score}
+                            {r.analysis_status === 'done' ? 'Analyzed' : 'Processing'}
                           </span>
-                        )}
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                          r.analysis_status === 'done'
-                            ? 'bg-primary/10 text-primary border-primary/20'
-                            : 'bg-muted text-muted-foreground border-border'
-                        }`}>
-                          {r.analysis_status === 'done' ? 'Analyzed' : 'Processing'}
-                        </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader className="border-b pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>My Patients</CardTitle>
+                    <CardDescription>Recent activity from your patients</CardDescription>
+                  </div>
+                  <Link to="/appointments">
+                    <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                      Manage All <ArrowRight className="h-3 w-3" />
+                    </Button>
+                  </Link>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="pt-4">
+                {appointments.length === 0 ? (
+                  <div className="text-center py-8 opacity-50">
+                    <p className="text-sm">No patients assigned yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Extract unique patients from appointments */}
+                    {Array.from(new Set(appointments.map(a => a.user_id?._id)))
+                      .filter(id => id)
+                      .slice(0, 5)
+                      .map(patientId => {
+                        const patientApts = appointments.filter(a => a.user_id?._id === patientId);
+                        const patient = patientApts[0].user_id;
+                        return (
+                          <div key={patientId} className="flex items-center justify-between p-3 border rounded-xl">
+                            <div className="flex gap-3 items-center">
+                              <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                <Activity className="h-4 w-4 text-primary" />
+                              </div>
+                              <div>
+                                <p className="font-semibold text-sm">{patient?.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {patientApts.length} appointment(s) scheduled
+                                </p>
+                              </div>
+                            </div>
+                            <Link to={`/appointments?patient=${patientId}`}>
+                              <Button size="sm" variant="ghost">View Details</Button>
+                            </Link>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Upcoming appointments */}
           <Card>

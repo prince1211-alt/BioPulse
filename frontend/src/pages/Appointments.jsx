@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
+import { format, isFuture, isToday } from 'date-fns';
 import {
   CalendarCheck, Clock, CheckCircle2, XCircle,
   Stethoscope, Search, UserCircle, RefreshCw,
-  ChevronRight, MapPin,
+  Calendar, Trash2, Users, FileText
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { appointmentApi } from '../api/appointment.api';
 import { useAuthStore } from '../stores/authStore';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { Label } from '../components/ui/Label';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Skeleton } from '../components/ui/Skeleton';
 
@@ -23,38 +24,56 @@ const STATUS_STYLE = {
 };
 
 // ── Reschedule modal ──────────────────────────────────────────────────────────
-function RescheduleModal({ appointment, slots, onClose, onConfirm, isPending }) {
-  const [selected, setSelected] = useState('');
+function RescheduleModal({ appointment, onClose, onConfirm, isPending }) {
+  const [selectedSlot, setSelectedSlot] = useState(null);
+
+  const { data: schedulesRes } = useQuery({
+    queryKey: ['doctorSchedules', appointment.doctor?._id || appointment.doctor_id],
+    queryFn: () => appointmentApi.getDoctorSchedules(appointment.doctor?._id || appointment.doctor_id).then(r => r.data?.data || r.data || []),
+  });
+
+  const schedules = Array.isArray(schedulesRes) ? schedulesRes : [];
+  
+  // Flatten slots
+  const availableSlots = schedules.flatMap(s => 
+    s.slots
+      .filter(slot => slot.booked < s.max_patients)
+      .map(slot => ({ ...slot, max: s.max_patients }))
+  ).sort((a, b) => new Date(a.time) - new Date(b.time));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-background rounded-2xl shadow-2xl w-full max-w-sm border p-6 space-y-4">
         <h3 className="font-bold text-lg">Reschedule Appointment</h3>
         <p className="text-sm text-muted-foreground">Select a new slot with Dr. {appointment.doctor?.name || appointment.doctor_id?.name}</p>
-        <div className="space-y-2 max-h-48 overflow-y-auto">
-          {slots.length === 0 && (
-            <p className="text-sm text-muted-foreground py-4 text-center">No available slots.</p>
+        
+        <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+          {availableSlots.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No available slots found.</p>
+          ) : (
+            availableSlots.map((slot) => (
+              <button
+                key={slot._id}
+                onClick={() => setSelectedSlot(slot.time)}
+                className={`w-full text-left p-3 rounded-lg border text-sm transition-colors flex justify-between items-center ${
+                  selectedSlot === slot.time
+                    ? 'border-primary bg-primary/5 font-semibold text-primary'
+                    : 'border-border hover:bg-muted'
+                }`}
+              >
+                <span>{format(new Date(slot.time), 'EEE, MMM dd • hh:mm a')}</span>
+                <span className="text-[10px] bg-primary/10 px-2 py-0.5 rounded-full">{slot.max - slot.booked} left</span>
+              </button>
+            ))
           )}
-          {slots.map((slot) => (
-            <button
-              key={slot}
-              onClick={() => setSelected(slot)}
-              className={`w-full text-left p-3 rounded-lg border text-sm transition-colors ${
-                selected === slot
-                  ? 'border-primary bg-primary/5 font-semibold'
-                  : 'border-border hover:bg-muted'
-              }`}
-            >
-              {format(new Date(slot), 'EEE, MMM dd • hh:mm a')}
-            </button>
-          ))}
         </div>
+
         <div className="flex gap-3 pt-2">
           <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
           <Button
             className="flex-1"
-            disabled={!selected || isPending}
-            onClick={() => onConfirm(selected)}
+            disabled={!selectedSlot || isPending}
+            onClick={() => onConfirm(selectedSlot)}
           >
             {isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : 'Confirm'}
           </Button>
@@ -63,6 +82,114 @@ function RescheduleModal({ appointment, slots, onClose, onConfirm, isPending }) 
     </div>
   );
 }
+
+// ── Doctor Availability Modal (Patient View) ──────────────────────────────────
+function DoctorBookingModal({ doctor, onClose, onBook, isPending }) {
+  const { data: schedulesRes, isLoading } = useQuery({
+    queryKey: ['doctorSchedules', doctor._id],
+    queryFn: () => appointmentApi.getDoctorSchedules(doctor._id).then(r => r.data?.data || r.data || []),
+  });
+
+  const schedules = Array.isArray(schedulesRes) ? schedulesRes : [];
+  const [selectedDate, setSelectedDate] = useState('');
+  
+  // Get unique upcoming dates from schedules
+  const availableDates = [...new Set(schedules.map(s => s.date))].sort();
+  
+  // Set initial selected date
+  if (availableDates.length > 0 && !selectedDate) {
+    setSelectedDate(availableDates[0]);
+  }
+
+  const activeSchedule = schedules.find(s => s.date === selectedDate);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-background rounded-2xl shadow-2xl w-full max-w-md border overflow-hidden flex flex-col max-h-[85vh]">
+        <div className="p-5 border-b bg-muted/30">
+          <h3 className="font-bold text-lg">Book Appointment</h3>
+          <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
+            <Stethoscope className="h-3.5 w-3.5" /> Dr. {doctor.name} ({doctor.specialisation})
+          </p>
+        </div>
+        
+        <div className="p-5 overflow-y-auto flex-1 space-y-5">
+          {isLoading ? (
+            <div className="space-y-3"><Skeleton className="h-10" /><Skeleton className="h-32" /></div>
+          ) : schedules.length === 0 ? (
+            <div className="text-center py-8">
+              <Calendar className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-muted-foreground text-sm">This doctor has no available schedules.</p>
+            </div>
+          ) : (
+            <>
+              {/* Date Selection */}
+              <div className="space-y-2">
+                <Label>Select Date</Label>
+                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                  {availableDates.map(date => {
+                    const d = new Date(date);
+                    return (
+                      <button
+                        key={date}
+                        onClick={() => setSelectedDate(date)}
+                        className={`min-w-[80px] shrink-0 p-2 rounded-lg border text-center transition-colors ${
+                          selectedDate === date ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted'
+                        }`}
+                      >
+                        <p className="text-xs uppercase font-bold text-muted-foreground">{format(d, 'MMM')}</p>
+                        <p className="text-lg font-black">{format(d, 'dd')}</p>
+                        <p className="text-[10px]">{format(d, 'EEE')}</p>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Time Slots */}
+              {activeSchedule && (
+                <div className="space-y-2">
+                  <Label>Available Time Slots</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {activeSchedule.slots.map(slot => {
+                      const isFull = slot.booked >= activeSchedule.max_patients;
+                      const isPast = !isFuture(new Date(slot.time));
+                      const disabled = isFull || isPast;
+                      
+                      return (
+                        <button
+                          key={slot._id}
+                          disabled={disabled || isPending}
+                          onClick={() => onBook(slot.time)}
+                          className={`p-3 rounded-lg border text-sm flex flex-col items-center gap-1 transition-all ${
+                            disabled ? 'opacity-50 bg-muted cursor-not-allowed' : 'hover:border-primary hover:bg-primary/5'
+                          }`}
+                        >
+                          <span className="font-semibold">{format(new Date(slot.time), 'hh:mm a')}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            isPast ? 'bg-muted-foreground/20 text-muted-foreground' :
+                            isFull ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {isPast ? 'Passed' : isFull ? 'Full' : `${activeSchedule.max_patients - slot.booked} left`}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="p-4 border-t bg-muted/10">
+          <Button variant="outline" className="w-full" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function AppointmentsPage() {
@@ -73,27 +200,18 @@ export function AppointmentsPage() {
   const [selectedSpec,    setSelectedSpec]    = useState('');
   const [searchQuery,     setSearchQuery]     = useState('');
   const [reschedulingApt, setReschedulingApt] = useState(null);
+  const [bookingDoctor,   setBookingDoctor]   = useState(null);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
   const { data: doctorsRes, isLoading: isLoadingDoctors, isError: isDoctorsError } = useQuery({
     queryKey: ['doctors', selectedSpec],
     queryFn:  () => appointmentApi.getDoctors(selectedSpec || undefined).then((r) => r.data),
-    enabled:  !isDoctor, // doctors don't need to browse themselves
+    enabled:  !isDoctor,
   });
 
   const { data: aptRes, isLoading: isLoadingApt, isError: isAptError } = useQuery({
     queryKey: ['appointments'],
     queryFn:  () => appointmentApi.getAll().then((r) => r.data),
-  });
-
-  // For reschedule: fetch the doctor's available slots
-  const { data: slotsRes, isError: isSlotsError } = useQuery({
-    queryKey: ['doctorSlots', reschedulingApt?.doctor?._id || reschedulingApt?.doctor_id],
-    queryFn: () =>
-      appointmentApi
-        .getDoctorSlots(reschedulingApt.doctor?._id || reschedulingApt.doctor_id)
-        .then((r) => r.data?.data || r.data || []),
-    enabled: !!reschedulingApt,
   });
 
   // ── Mutations ────────────────────────────────────────────────────────────────
@@ -102,7 +220,7 @@ export function AppointmentsPage() {
     onSuccess:  () => {
       toast.success('Appointment cancelled');
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
-      queryClient.invalidateQueries({ queryKey: ['doctors'] });
+      queryClient.invalidateQueries({ queryKey: ['doctorSchedules'] });
     },
     onError: (err) => toast.error(err.message || 'Failed to cancel'),
   });
@@ -110,9 +228,10 @@ export function AppointmentsPage() {
   const bookMutation = useMutation({
     mutationFn: appointmentApi.book,
     onSuccess:  () => {
-      toast.success('Appointment booked!');
+      toast.success('Appointment booked successfully!');
+      setBookingDoctor(null);
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
-      queryClient.invalidateQueries({ queryKey: ['doctors'] });
+      queryClient.invalidateQueries({ queryKey: ['doctorSchedules'] });
     },
     onError: (err) => toast.error(err.message || 'Failed to book appointment'),
   });
@@ -120,15 +239,14 @@ export function AppointmentsPage() {
   const rescheduleMutation = useMutation({
     mutationFn: ({ id, newDate }) => appointmentApi.reschedule(id, newDate),
     onSuccess: () => {
-      toast.success('Appointment rescheduled');
+      toast.success('Appointment rescheduled successfully');
       setReschedulingApt(null);
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
-      queryClient.invalidateQueries({ queryKey: ['doctors'] });
+      queryClient.invalidateQueries({ queryKey: ['doctorSchedules'] });
     },
     onError: (err) => toast.error(err.message || 'Failed to reschedule'),
   });
 
-  // Doctor-only: mark completed / no-show
   const statusMutation = useMutation({
     mutationFn: ({ id, status }) => appointmentApi.updateStatus(id, status),
     onSuccess: () => {
@@ -148,7 +266,6 @@ export function AppointmentsPage() {
 
   const appointments = isAptError ? [] : extractArray(aptRes);
   const doctors      = isDoctorsError ? [] : extractArray(doctorsRes);
-  const availableSlots = isSlotsError ? [] : extractArray(slotsRes);
 
   const filteredDoctors = doctors.filter(
     (doc) =>
@@ -159,14 +276,12 @@ export function AppointmentsPage() {
   const upcoming = appointments.filter((a) => ['scheduled', 'rescheduled'].includes(a?.status));
   const past     = appointments.filter((a) => !['scheduled', 'rescheduled'].includes(a?.status));
 
-  const handleBook = (doc, slot) => {
-    if (window.confirm(`Book appointment with Dr. ${doc.name} on ${format(new Date(slot), 'PPpp')}?`)) {
-      bookMutation.mutate({ doctor_id: doc._id, scheduled_at: slot, type: 'consultation' });
-    }
+  const handleBook = (slotTime) => {
+    bookMutation.mutate({ doctor_id: bookingDoctor._id, scheduled_at: slotTime, type: 'consultation' });
   };
 
   return (
-    <div className="space-y-8 max-w-6xl mx-auto">
+    <div className="space-y-8 max-w-6xl mx-auto pb-20">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Appointments</h1>
         <p className="text-muted-foreground mt-1">
@@ -179,12 +294,20 @@ export function AppointmentsPage() {
       {reschedulingApt && (
         <RescheduleModal
           appointment={reschedulingApt}
-          slots={availableSlots || []}
           onClose={() => setReschedulingApt(null)}
           isPending={rescheduleMutation.isPending}
           onConfirm={(newDate) =>
             rescheduleMutation.mutate({ id: reschedulingApt._id, newDate })
           }
+        />
+      )}
+
+      {bookingDoctor && (
+        <DoctorBookingModal 
+          doctor={bookingDoctor}
+          onClose={() => setBookingDoctor(null)}
+          onBook={handleBook}
+          isPending={bookMutation.isPending}
         />
       )}
 
@@ -211,7 +334,6 @@ export function AppointmentsPage() {
               ) : (
                 <div className="space-y-3">
                   {upcoming.map((apt) => {
-                    // doctor field is populated in response (doctor_id was aliased to doctor)
                     const doc = apt.doctor || apt.doctor_id;
                     const patient = apt.user_id;
 
@@ -233,7 +355,6 @@ export function AppointmentsPage() {
                             <UserCircle className="h-6 w-6 text-primary/50" />
                           </div>
                           <div>
-                            {/* Patient sees doctor info; doctor sees patient info */}
                             <p className="font-bold text-sm">
                               {isDoctor
                                 ? (patient?.name || 'Patient')
@@ -252,45 +373,31 @@ export function AppointmentsPage() {
                         </div>
 
                         <div className="flex gap-2 justify-end border-t border-primary/10 pt-3">
-                          {/* Patient actions */}
                           {!isDoctor && (
                             <>
                               <Button
-                                variant="outline" size="sm"
-                                className="h-7 text-xs"
+                                variant="outline" size="sm" className="h-7 text-xs"
                                 onClick={() => setReschedulingApt(apt)}
-                              >
-                                Reschedule
-                              </Button>
+                              >Reschedule</Button>
                               <Button
-                                variant="destructive" size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => cancelMutation.mutate(apt._id)}
+                                variant="destructive" size="sm" className="h-7 text-xs"
+                                onClick={() => { if(window.confirm('Cancel appointment?')) cancelMutation.mutate(apt._id) }}
                                 disabled={cancelMutation.isPending}
-                              >
-                                Cancel
-                              </Button>
+                              >Cancel</Button>
                             </>
                           )}
-                          {/* Doctor actions */}
                           {isDoctor && (
                             <>
                               <Button
-                                variant="outline" size="sm"
-                                className="h-7 text-xs"
+                                variant="outline" size="sm" className="h-7 text-xs"
                                 onClick={() => statusMutation.mutate({ id: apt._id, status: 'completed' })}
                                 disabled={statusMutation.isPending}
-                              >
-                                <CheckCircle2 className="h-3 w-3 mr-1" /> Complete
-                              </Button>
+                              ><CheckCircle2 className="h-3 w-3 mr-1" /> Complete</Button>
                               <Button
-                                variant="ghost" size="sm"
-                                className="h-7 text-xs text-muted-foreground"
+                                variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground"
                                 onClick={() => statusMutation.mutate({ id: apt._id, status: 'no_show' })}
                                 disabled={statusMutation.isPending}
-                              >
-                                No-show
-                              </Button>
+                              >No-show</Button>
                             </>
                           )}
                         </div>
@@ -302,7 +409,6 @@ export function AppointmentsPage() {
             </CardContent>
           </Card>
 
-          {/* Past */}
           {past.length > 0 && (
             <Card className="border-dashed bg-transparent shadow-none">
               <CardContent className="pt-4">
@@ -334,10 +440,9 @@ export function AppointmentsPage() {
           )}
         </div>
 
-        {/* ── Find a doctor (patient only) ─────────────────────────────────── */}
+        {/* ── Patient: Find a doctor ────────────────────────────────────────── */}
         {!isDoctor && (
           <div className="lg:col-span-7 space-y-5">
-            {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-3 bg-card p-4 rounded-xl border">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -366,72 +471,36 @@ export function AppointmentsPage() {
             <h2 className="text-lg font-bold border-b pb-2">Available Specialists</h2>
 
             {isLoadingDoctors ? (
-              <div className="space-y-3"><Skeleton className="h-44" /><Skeleton className="h-44" /></div>
+              <div className="space-y-3"><Skeleton className="h-32" /><Skeleton className="h-32" /></div>
             ) : filteredDoctors.length === 0 ? (
               <div className="text-center py-12 border border-dashed rounded-xl">
                 <p className="text-muted-foreground text-sm">No doctors found. Try different filters.</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="grid sm:grid-cols-2 gap-4">
                 {filteredDoctors.map((doc) => (
-                  <Card key={doc._id} className="overflow-hidden hover:shadow-md transition-all">
-                    <div className="flex flex-col sm:flex-row">
-                      {/* Doctor info */}
-                      <div className="p-5 flex-1 border-b sm:border-b-0 sm:border-r bg-muted/10">
-                        <div className="flex items-start gap-3">
-                          <div className="h-12 w-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 text-primary font-bold text-sm">
-                            {doc.name?.charAt(0)}
-                          </div>
-                          <div>
-                            <h3 className="font-bold text-base">Dr. {doc.name}</h3>
-                            <p className="text-sm text-emerald-700 flex items-center gap-1 mt-1">
-                              <Stethoscope className="h-3.5 w-3.5" /> {doc.specialisation}
-                            </p>
-                            {doc.qualification && (
-                              <p className="text-xs text-muted-foreground mt-0.5">{doc.qualification}</p>
-                            )}
-                            <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                              {doc.experience_years && (
-                                <span>{doc.experience_years}+ yrs exp.</span>
-                              )}
-                              {doc.consultation_fee && (
-                                <span className="font-semibold text-foreground">₹{doc.consultation_fee}</span>
-                              )}
-                            </div>
+                  <Card key={doc._id} className="overflow-hidden hover:shadow-md transition-all flex flex-col">
+                    <div className="p-5 flex-1 bg-muted/10">
+                      <div className="flex items-start gap-3">
+                        <div className="h-12 w-12 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 text-primary font-bold text-lg">
+                          {doc.name?.charAt(0)}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-base line-clamp-1">Dr. {doc.name}</h3>
+                          <p className="text-sm text-emerald-700 flex items-center gap-1 mt-0.5">
+                            <Stethoscope className="h-3 w-3" /> {doc.specialisation}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
+                            {doc.experience_years && <span>{doc.experience_years}+ yrs exp.</span>}
+                            {doc.consultation_fee && <span className="font-semibold text-foreground">₹{doc.consultation_fee}</span>}
                           </div>
                         </div>
                       </div>
-
-                      {/* Slots */}
-                      <div className="p-4 sm:w-64 bg-card">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2.5 flex items-center gap-1">
-                          <Clock className="h-3 w-3" /> Available Slots
-                        </p>
-                        {doc.available_slots?.length > 0 ? (
-                          <div className="space-y-1.5">
-                            {doc.available_slots.slice(0, 3).map((slot, i) => (
-                              <button
-                                key={i}
-                                onClick={() => handleBook(doc, slot)}
-                                disabled={bookMutation.isPending}
-                                className="w-full text-left text-xs py-2 px-3 border border-primary/20 bg-background hover:bg-primary hover:text-primary-foreground hover:border-primary rounded-md transition-all flex justify-between items-center"
-                              >
-                                <span className="font-semibold">{format(new Date(slot), 'MMM dd')}</span>
-                                <span className="font-mono">{format(new Date(slot), 'hh:mm a')}</span>
-                              </button>
-                            ))}
-                            {doc.available_slots.length > 3 && (
-                              <p className="text-[11px] text-center text-muted-foreground">
-                                +{doc.available_slots.length - 3} more slots
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-center py-4 bg-muted/30 rounded-lg border border-dashed">
-                            <p className="text-xs text-muted-foreground">No slots available</p>
-                          </div>
-                        )}
-                      </div>
+                    </div>
+                    <div className="p-3 border-t bg-card text-center">
+                      <Button variant="outline" className="w-full text-xs" onClick={() => setBookingDoctor(doc)}>
+                        View Availability
+                      </Button>
                     </div>
                   </Card>
                 ))}
@@ -440,69 +509,182 @@ export function AppointmentsPage() {
           </div>
         )}
 
-        {/* ── Doctor: slot management ──────────────────────────────────────── */}
+        {/* ── Doctor: Slot Management ────────────────────────────────────────── */}
         {isDoctor && <DoctorSlotManager />}
       </div>
     </div>
   );
 }
 
-// ── Doctor slot manager ───────────────────────────────────────────────────────
+// ── Doctor slot manager component ──────────────────────────────────────────────
 function DoctorSlotManager() {
   const queryClient = useQueryClient();
-  const [newSlot, setNewSlot] = useState('');
+  const { user } = useAuthStore();
+  
+  const [date, setDate] = useState('');
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('17:00');
+  const [duration, setDuration] = useState('30');
+  const [capacity, setCapacity] = useState('1');
+
+  const { data: schedulesRes, isLoading } = useQuery({
+    queryKey: ['doctorSchedules', user._id],
+    queryFn: () => appointmentApi.getDoctorSchedules(user._id).then(r => r.data?.data || r.data || []),
+  });
+
+  const schedules = Array.isArray(schedulesRes) ? schedulesRes : [];
 
   const addMutation = useMutation({
-    mutationFn: (slots) => appointmentApi.addSlots({ slots }),
-    onSuccess: () => {
-      toast.success('Slot added');
-      setNewSlot('');
-      queryClient.invalidateQueries({ queryKey: ['doctors'] });
+    mutationFn: (data) => appointmentApi.addSchedule(data),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'Schedule created successfully');
+      queryClient.invalidateQueries({ queryKey: ['doctorSchedules'] });
     },
     onError: (err) => toast.error(err.message),
   });
 
   const removeMutation = useMutation({
-    mutationFn: (slot) => appointmentApi.removeSlot(slot),
+    mutationFn: (id) => appointmentApi.removeSchedule(id),
     onSuccess: () => {
-      toast.success('Slot removed');
-      queryClient.invalidateQueries({ queryKey: ['doctors'] });
+      toast.success('Schedule deleted');
+      queryClient.invalidateQueries({ queryKey: ['doctorSchedules'] });
     },
     onError: (err) => toast.error(err.message),
   });
 
-  const { data: slotsRes } = useQuery({
-    queryKey: ['mySlots'],
-    queryFn:  () => appointmentApi.addSlots({ slots: [] }).catch(() => ({ data: [] })), // just to init
-  });
+  const handleCreate = (e) => {
+    e.preventDefault();
+    addMutation.mutate({
+      date,
+      start_time: startTime,
+      end_time: endTime,
+      slot_duration: parseInt(duration),
+      max_patients: parseInt(capacity),
+    });
+  };
 
   return (
     <div className="lg:col-span-7 space-y-5">
       <Card>
         <CardHeader className="pb-3 border-b">
-          <CardTitle className="text-lg">Manage Your Availability</CardTitle>
+          <CardTitle className="text-lg">Create New Schedule</CardTitle>
         </CardHeader>
-        <CardContent className="pt-4 space-y-4">
-          <div className="flex gap-3">
-            <Input
-              type="datetime-local"
-              value={newSlot}
-              onChange={(e) => setNewSlot(e.target.value)}
-              min={new Date().toISOString().slice(0, 16)}
-              className="flex-1"
-            />
-            <Button
-              onClick={() => newSlot && addMutation.mutate([new Date(newSlot).toISOString()])}
-              disabled={!newSlot || addMutation.isPending}
-            >
-              Add Slot
+        <CardContent className="pt-4">
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Date</Label>
+                <Input 
+                  type="date" 
+                  required 
+                  value={date} 
+                  onChange={e => setDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]} 
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Slot Duration (mins)</Label>
+                <Input 
+                  type="number" 
+                  required min="5" max="120" step="5"
+                  value={duration} 
+                  onChange={e => setDuration(e.target.value)} 
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Start Time</Label>
+                <Input 
+                  type="time" 
+                  required 
+                  value={startTime} 
+                  onChange={e => setStartTime(e.target.value)} 
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>End Time</Label>
+                <Input 
+                  type="time" 
+                  required 
+                  value={endTime} 
+                  onChange={e => setEndTime(e.target.value)} 
+                />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label>Max Patients Per Slot</Label>
+                <Input 
+                  type="number" 
+                  required min="1" 
+                  value={capacity} 
+                  onChange={e => setCapacity(e.target.value)} 
+                  placeholder="e.g. 1 for private, 10 for group"
+                />
+              </div>
+            </div>
+            <Button type="submit" className="w-full" disabled={addMutation.isPending}>
+              {addMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : 'Generate Slots'}
             </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Added slots will be visible to patients for booking.
-          </p>
+          </form>
         </CardContent>
       </Card>
+
+      <div className="space-y-3">
+        <h3 className="font-bold text-lg border-b pb-2">Active Schedules</h3>
+        {isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : schedules.length === 0 ? (
+          <div className="text-center py-8 border border-dashed rounded-xl text-muted-foreground text-sm">
+            No active schedules. Create one above to allow bookings.
+          </div>
+        ) : (
+          schedules.map(sched => {
+            const totalSlots = sched.slots.length;
+            const bookedSlots = sched.slots.reduce((acc, slot) => acc + slot.booked, 0);
+            const totalCapacity = totalSlots * sched.max_patients;
+            const percentFull = Math.round((bookedSlots / totalCapacity) * 100) || 0;
+
+            return (
+              <Card key={sched._id} className="overflow-hidden">
+                <div className="flex flex-col sm:flex-row">
+                  <div className="p-4 bg-primary/5 border-r flex-1 flex items-center justify-between">
+                    <div>
+                      <p className="font-bold flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-primary" />
+                        {format(new Date(sched.date), 'EEEE, MMM dd, yyyy')}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                        <Clock className="h-3 w-3" /> {sched.start_time} - {sched.end_time} • {sched.slot_duration}m slots
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                        <Users className="h-3 w-3" /> Max {sched.max_patients} patient(s) per slot
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-4 bg-card sm:w-48 flex flex-col justify-center space-y-2">
+                    <div className="flex justify-between text-xs font-medium">
+                      <span>Capacity</span>
+                      <span>{bookedSlots} / {totalCapacity}</span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full ${percentFull >= 100 ? 'bg-red-500' : 'bg-primary'}`} 
+                        style={{ width: `${percentFull}%` }} 
+                      />
+                    </div>
+                    <Button 
+                      variant="ghost" size="sm" 
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 w-full mt-1"
+                      onClick={() => { if(window.confirm('Delete this entire schedule? This fails if active bookings exist.')) removeMutation.mutate(sched._id) }}
+                      disabled={removeMutation.isPending}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Remove
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )
+          })
+        )}
+      </div>
     </div>
   );
 }

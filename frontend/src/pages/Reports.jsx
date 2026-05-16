@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import {
@@ -15,14 +15,14 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../co
 import { Skeleton } from '../components/ui/Skeleton';
 
 const VALID_REPORT_TYPES = [
-  { value: 'blood_test',   label: 'Blood Test' },
-  { value: 'lipid_panel',  label: 'Lipid Panel' },
-  { value: 'diabetes',     label: 'Diabetes / HbA1c' },
-  { value: 'thyroid',      label: 'Thyroid' },
-  { value: 'urine',        label: 'Urine Analysis' },
-  { value: 'xray',         label: 'X-Ray' },
-  { value: 'mri',          label: 'MRI' },
-  { value: 'other',        label: 'Other' },
+  { value: 'blood_test',  label: 'Blood Test' },
+  { value: 'lipid_panel', label: 'Lipid Panel' },
+  { value: 'diabetes',    label: 'Diabetes / HbA1c' },
+  { value: 'thyroid',     label: 'Thyroid' },
+  { value: 'urine',       label: 'Urine Analysis' },
+  { value: 'xray',        label: 'X-Ray' },
+  { value: 'mri',         label: 'MRI' },
+  { value: 'other',       label: 'Other' },
 ];
 
 const URGENCY_COLORS = {
@@ -39,13 +39,30 @@ const STATUS_COLORS = {
   critical:   'bg-red-50 text-red-700 border-red-200',
 };
 
-// ── Polling hook: refetch a single report until analysis is done ──────────────
+// FIX 1: Stop polling on 'failed' states and after a 5-min timeout.
+// Original only stopped on `data?.ready` — a failed job polled forever.
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
 function useReportPolling(reportId, enabled) {
+  const startedAt = useRef(Date.now());
+
+  // Reset timer whenever polling is newly enabled (e.g. after re-analyze)
+  useEffect(() => {
+    if (enabled) startedAt.current = Date.now();
+  }, [enabled]);
+
   return useQuery({
     queryKey: ['reportStatus', reportId],
     queryFn:  () => reportApi.getStatus(reportId).then((r) => r.data),
     enabled:  !!reportId && enabled,
-    refetchInterval: (data) => (data?.ready ? false : 4000),
+    refetchInterval: (data) => {
+      // Stop if done or failed
+      if (data?.ready) return false;
+      if (data?.ocr_status === 'failed' || data?.analysis_status === 'failed') return false;
+      // FIX: Stop after timeout so we never poll indefinitely
+      if (Date.now() - startedAt.current > POLL_TIMEOUT_MS) return false;
+      return 4000;
+    },
   });
 }
 
@@ -54,22 +71,20 @@ function ReportCard({ report, onDelete, onReanalyze }) {
   const [expanded, setExpanded] = useState(false);
   const queryClient = useQueryClient();
 
-  const analysisIncomplete = report.analysis_status !== 'done';
+  const analysisIncomplete =
+    report.analysis_status !== 'done' && report.analysis_status !== 'failed';
 
-  // Poll until done
   const { data: statusData } = useReportPolling(report._id, analysisIncomplete);
 
-  // When polling detects completion, refresh the reports list
   useEffect(() => {
     if (statusData?.ready) {
       queryClient.invalidateQueries({ queryKey: ['reports'] });
     }
-  }, [statusData?.ready]);
+  }, [statusData?.ready, queryClient]);
 
-  // Merge live status data over stale list data
+  // Merge live status over stale list data
   const liveReport = { ...report, ...statusData };
 
-  // ai_insights is a parsed object (set by worker); ai_summary is raw string fallback
   const insights =
     typeof liveReport.ai_insights === 'object' && liveReport.ai_insights
       ? liveReport.ai_insights
@@ -80,6 +95,18 @@ function ReportCard({ report, onDelete, onReanalyze }) {
     liveReport.risk_label === 'high'     ? 'text-orange-600' :
     liveReport.risk_label === 'moderate' ? 'text-amber-600' :
     'text-emerald-600';
+
+  // FIX 2: Detect stuck processing (is_stuck comes from the fixed backend).
+  // Fallback: if backend doesn't have the field yet, show generic message after timeout.
+  const isStuck = liveReport.is_stuck ?? false;
+
+  // FIX 3: Surface actionable error from backend instead of a generic message.
+  const userMessage = liveReport.user_message ?? null;
+
+  const processingLabel =
+    liveReport.ocr_status !== 'done'
+      ? 'Extracting text from document…'
+      : 'AI is analyzing your biomarkers…';
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow border-border/60">
@@ -106,12 +133,18 @@ function ReportCard({ report, onDelete, onReanalyze }) {
             <span className={`px-2 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 border ${
               liveReport.ocr_status === 'done'
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : liveReport.ocr_status === 'failed'
+                ? 'bg-red-50 text-red-600 border-red-200'          // FIX: was missing failed color
                 : 'bg-blue-50 text-blue-600 border-blue-200'
             }`}>
               {liveReport.ocr_status === 'done'
                 ? <CheckCircle className="h-3 w-3" />
+                : liveReport.ocr_status === 'failed'
+                ? <AlertTriangle className="h-3 w-3" />
                 : <Clock className="h-3 w-3 animate-pulse" />}
-              OCR {liveReport.ocr_status === 'done' ? 'Done' : 'Processing'}
+              OCR {liveReport.ocr_status === 'done' ? 'Done'
+                 : liveReport.ocr_status === 'failed' ? 'Failed'
+                 : 'Processing'}
             </span>
 
             {/* AI badge */}
@@ -159,39 +192,71 @@ function ReportCard({ report, onDelete, onReanalyze }) {
       </CardHeader>
 
       <CardContent className="pt-5 pb-4">
-        {/* Analyzing spinner */}
-        {liveReport.analysis_status !== 'done' && liveReport.analysis_status !== 'failed' && (
+        {/* Stuck warning — shown when processing exceeds the backend timeout */}
+        {isStuck && liveReport.analysis_status !== 'done' && (
+          <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-700">
+            <Clock className="h-4 w-4 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              {userMessage || 'Processing is taking longer than expected.'}
+            </div>
+            {/* Only show re-analyze if OCR is done — otherwise there's nothing to retry */}
+            {liveReport.ocr_status === 'done' && (
+              <button
+                onClick={() => onReanalyze(liveReport._id)}
+                className="text-xs font-semibold underline shrink-0"
+              >
+                Re-analyze
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Normal processing spinner */}
+        {!isStuck &&
+         liveReport.analysis_status !== 'done' &&
+         liveReport.analysis_status !== 'failed' &&
+         liveReport.ocr_status !== 'failed' && (
           <div className="text-center py-6">
             <div className="inline-flex flex-col items-center gap-3">
               <div className="h-8 w-8 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
-              <p className="text-sm text-muted-foreground font-medium">
-                {liveReport.ocr_status !== 'done'
-                  ? 'Extracting text from document…'
-                  : 'AI is analyzing your biomarkers…'}
-              </p>
+              <p className="text-sm text-muted-foreground font-medium">{processingLabel}</p>
             </div>
           </div>
         )}
 
-        {/* Failed state */}
-        {liveReport.analysis_status === 'failed' && (
-          <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            Analysis failed. Click the refresh icon to retry.
+        {/* FIX 3: OCR failed — show backend message, not a generic string */}
+        {liveReport.ocr_status === 'failed' && (
+          <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>{userMessage || 'Text extraction failed. Please re-upload the file.'}</span>
+          </div>
+        )}
+
+        {/* Analysis failed */}
+        {liveReport.ocr_status !== 'failed' && liveReport.analysis_status === 'failed' && (
+          <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              {userMessage || 'Analysis failed. Click Re-analyze to retry.'}
+            </div>
+            <button
+              onClick={() => onReanalyze(liveReport._id)}
+              className="text-xs font-semibold underline shrink-0"
+            >
+              Re-analyze
+            </button>
           </div>
         )}
 
         {/* Analysis results */}
         {liveReport.analysis_status === 'done' && insights && (
           <div className="space-y-5">
-            {/* Summary */}
             {insights.summary && (
               <div className="bg-secondary/20 border rounded-lg p-4 text-sm leading-relaxed text-foreground/90">
                 {insights.summary}
               </div>
             )}
 
-            {/* Urgency banner */}
             {insights.urgency?.level && insights.urgency.level !== 'routine' && (
               <div className={`flex items-start gap-3 rounded-lg p-3 border text-sm font-medium ${URGENCY_COLORS[insights.urgency.level] || URGENCY_COLORS.routine}`}>
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -202,7 +267,6 @@ function ReportCard({ report, onDelete, onReanalyze }) {
               </div>
             )}
 
-            {/* Key findings */}
             {insights.key_findings?.length > 0 && (
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
@@ -227,7 +291,6 @@ function ReportCard({ report, onDelete, onReanalyze }) {
               </div>
             )}
 
-            {/* Expand toggle */}
             <button
               onClick={() => setExpanded((e) => !e)}
               className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
@@ -238,7 +301,6 @@ function ReportCard({ report, onDelete, onReanalyze }) {
 
             {expanded && (
               <div className="space-y-4 pt-2 border-t">
-                {/* Risks */}
                 {insights.risks?.length > 0 && (
                   <Section icon={<Shield className="h-3.5 w-3.5" />} title="Identified Risks">
                     <ul className="space-y-1">
@@ -251,7 +313,6 @@ function ReportCard({ report, onDelete, onReanalyze }) {
                   </Section>
                 )}
 
-                {/* Diet recommendations */}
                 {insights.diet_recommendations?.length > 0 && (
                   <Section icon={<Utensils className="h-3.5 w-3.5" />} title="Diet Recommendations">
                     <ul className="space-y-1">
@@ -264,7 +325,6 @@ function ReportCard({ report, onDelete, onReanalyze }) {
                   </Section>
                 )}
 
-                {/* Exercise */}
                 {insights.exercise_recommendations?.plan?.length > 0 && (
                   <Section icon={<Dumbbell className="h-3.5 w-3.5" />} title={`Exercise — ${insights.exercise_recommendations.weekly_minutes} min/week`}>
                     <ul className="space-y-1">
@@ -277,7 +337,6 @@ function ReportCard({ report, onDelete, onReanalyze }) {
                   </Section>
                 )}
 
-                {/* Doctor recommendations */}
                 {insights.doctor_recommendations?.length > 0 && (
                   <Section icon={<Stethoscope className="h-3.5 w-3.5" />} title="Doctor Recommendations">
                     <ul className="space-y-1">
@@ -290,7 +349,6 @@ function ReportCard({ report, onDelete, onReanalyze }) {
                   </Section>
                 )}
 
-                {/* Disclaimer */}
                 {insights.disclaimer && (
                   <p className="text-[11px] text-muted-foreground border-t pt-3 italic">{insights.disclaimer}</p>
                 )}
@@ -299,7 +357,7 @@ function ReportCard({ report, onDelete, onReanalyze }) {
           </div>
         )}
 
-        {/* Fallback: raw ai_summary string (backward compat) */}
+        {/* Fallback: raw ai_summary string */}
         {liveReport.analysis_status === 'done' && !insights && liveReport.ai_summary && (
           <div className="bg-secondary/20 border rounded-lg p-4 text-sm leading-relaxed">
             {liveReport.ai_summary}
@@ -330,6 +388,16 @@ export function ReportsPage() {
   const { data: reportsRes, isLoading, isError: isReportsError } = useQuery({
     queryKey: ['reports'],
     queryFn:  () => reportApi.getAll().then((r) => r.data),
+    // FALLBACK: If any report is in processing/analyzing state, 
+    // poll the entire list every 5s as a safety net for sockets.
+    refetchInterval: (data) => {
+      const reports = data?.reports || data?.data?.reports || [];
+      const hasProcessing = reports.some(r => 
+        ['processing', 'pending', 'analyzing'].includes(r.ocr_status) || 
+        ['processing', 'pending', 'analyzing'].includes(r.analysis_status)
+      );
+      return hasProcessing ? 5000 : false;
+    }
   });
 
   const extractArray = (res, fallbackField) => {
@@ -343,16 +411,13 @@ export function ReportsPage() {
 
   const reports = isReportsError ? [] : extractArray(reportsRes, 'reports');
 
-  // ── Upload mutation ─────────────────────────────────────────────────────────
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error('No file selected');
-
       const formData = new FormData();
       formData.append('file', file);
       formData.append('report_type', reportType);
       formData.append('report_date', new Date().toISOString());
-
       const { data: created } = await reportApi.upload(formData);
       return created;
     },
@@ -367,17 +432,18 @@ export function ReportsPage() {
     onError: (err) => toast.error(err.message || 'Upload failed'),
   });
 
-  // ── Reanalyze mutation ──────────────────────────────────────────────────────
+  // FIX 4: After re-analyze succeeds, also invalidate the individual status cache
+  // so the card immediately exits the "failed" state and shows the spinner again.
   const reanalyzeMutation = useMutation({
     mutationFn: (id) => reportApi.reanalyze(id),
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       toast.success('Re-analysis triggered');
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['reportStatus', id] });
     },
     onError: (err) => toast.error(err.message || 'Failed to reanalyze'),
   });
 
-  // ── Delete mutation ─────────────────────────────────────────────────────────
   const deleteMutation = useMutation({
     mutationFn: (id) => reportApi.delete(id),
     onSuccess: () => {
@@ -402,7 +468,6 @@ export function ReportsPage() {
         </p>
       </div>
 
-      {/* Upload card */}
       <Card className="border-primary/20">
         <CardHeader className="bg-primary/5 border-b pb-4">
           <CardTitle className="text-base flex items-center gap-2">
@@ -444,15 +509,14 @@ export function ReportsPage() {
               disabled={!file || uploadMutation.isPending}
               className="min-w-[120px]"
             >
-              {uploadMutation.isPending ? (
-                <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Uploading…</>
-              ) : 'Upload & Analyze'}
+              {uploadMutation.isPending
+                ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Uploading…</>
+                : 'Upload & Analyze'}
             </Button>
           </form>
         </CardContent>
       </Card>
 
-      {/* Reports list */}
       <div className="space-y-5">
         <h2 className="text-xl font-bold">Analysis Timeline</h2>
 

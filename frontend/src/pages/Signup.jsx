@@ -17,6 +17,11 @@ const signupSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Please enter a valid email address'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
+  role: z.enum(['patient', 'doctor']),
+  specialisation: z.string().optional(),
+}).refine((data) => data.role !== 'doctor' || !!data.specialisation, {
+  message: "Specialisation is required for doctors",
+  path: ["specialisation"],
 });
 
 export function SignupPage() {
@@ -27,10 +32,17 @@ export function SignupPage() {
   const {
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(signupSchema),
+    defaultValues: {
+      role: 'patient'
+    }
   });
+
+  const selectedRole = watch('role');
 
   const onSubmit = async (data) => {
     setIsLoading(true);
@@ -99,7 +111,7 @@ export function SignupPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Enter your password"
+                  placeholder="Create a secure password"
                   {...register('password')}
                   className={errors.password ? 'border-destructive' : ''}
                 />
@@ -107,6 +119,42 @@ export function SignupPage() {
                   <p className="text-xs text-destructive">{errors.password.message}</p>
                 )}
               </div>
+              <div className="space-y-2">
+                <Label>I am a...</Label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div 
+                    onClick={() => setValue('role', 'patient', { shouldValidate: true })}
+                    className={`flex items-center justify-center p-3 rounded-lg border-2 cursor-pointer transition-all ${selectedRole === 'patient' ? 'border-primary bg-primary/5 text-primary' : 'border-muted text-muted-foreground hover:border-primary/50'}`}
+                  >
+                    <span className="font-medium">Patient</span>
+                  </div>
+                  <div 
+                    onClick={() => setValue('role', 'doctor', { shouldValidate: true })}
+                    className={`flex items-center justify-center p-3 rounded-lg border-2 cursor-pointer transition-all ${selectedRole === 'doctor' ? 'border-primary bg-primary/5 text-primary' : 'border-muted text-muted-foreground hover:border-primary/50'}`}
+                  >
+                    <span className="font-medium">Doctor</span>
+                  </div>
+                </div>
+                {errors.role && (
+                  <p className="text-xs text-destructive">{errors.role.message}</p>
+                )}
+              </div>
+
+              {selectedRole === 'doctor' && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <Label htmlFor="specialisation">Specialisation</Label>
+                  <Input
+                    id="specialisation"
+                    placeholder="e.g. Cardiologist, General Physician"
+                    {...register('specialisation')}
+                    className={errors.specialisation ? 'border-destructive' : ''}
+                  />
+                  {errors.specialisation && (
+                    <p className="text-xs text-destructive">{errors.specialisation.message}</p>
+                  )}
+                </div>
+              )}
+
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" className="w-full" disabled={isLoading}>
