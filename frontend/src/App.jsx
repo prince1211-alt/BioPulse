@@ -6,6 +6,8 @@ import { Activity, Pill, CalendarCheck, FileText, Salad, LogOut, User, Loader2 }
 import { useAuthStore } from './stores/authStore';
 import { useNotificationStore } from './stores/notificationStore';
 import { authApi } from './api/auth.api';
+import { useFCM } from './hooks/useFCM';
+import { NotificationBell } from './components/NotificationBell';
 
 // Lazy loading pages
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
@@ -27,11 +29,11 @@ const SuspenseFallback = () => (
 // ─── Nav items ────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
-  { path: '/dashboard',    label: 'Dashboard',     icon: Activity     },
-  { path: '/medicines',    label: 'Medicines',      icon: Pill         },
-  { path: '/appointments', label: 'Appointments',   icon: CalendarCheck },
-  { path: '/reports',      label: 'Reports',        icon: FileText     },
-  { path: '/diet',         label: 'Diet',           icon: Salad        },
+  { path: '/dashboard',    label: 'Dashboard',     icon: Activity,      allowedRoles: ['patient', 'doctor', 'admin'] },
+  { path: '/medicines',    label: 'Medicines',     icon: Pill,          allowedRoles: ['patient'] },
+  { path: '/appointments', label: 'Appointments',  icon: CalendarCheck, allowedRoles: ['patient', 'doctor', 'admin'] },
+  { path: '/reports',      label: 'Reports',       icon: FileText,      allowedRoles: ['patient'] },
+  { path: '/diet',         label: 'Diet',          icon: Salad,         allowedRoles: ['patient'] },
 ];
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
@@ -39,6 +41,9 @@ const NAV_ITEMS = [
 const Layout = ({ children }) => {
   const { user, clearAuth } = useAuthStore();
   const { clear: clearNotifications } = useNotificationStore();
+
+  // Register device for push notifications on first authenticated mount
+  useFCM();
 
   const handleLogout = async () => {
     try {
@@ -50,6 +55,8 @@ const Layout = ({ children }) => {
       clearNotifications();
     }
   };
+
+  const visibleNavItems = NAV_ITEMS.filter(item => item.allowedRoles.includes(user?.role || 'patient'));
 
   return (
     <div className="flex min-h-screen bg-muted/30">
@@ -64,7 +71,7 @@ const Layout = ({ children }) => {
           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 px-2">
             Menu
           </p>
-          {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
+          {visibleNavItems.map(({ path, label, icon: Icon }) => (
             <NavLink
               key={path}
               to={path}
@@ -110,6 +117,9 @@ const Layout = ({ children }) => {
 
           {/* Right side actions */}
           <div className="flex items-center gap-2 ml-auto">
+            {/* 🔔 Notification Bell */}
+            <NotificationBell />
+
             <NavLink
               to="/profile"
               className={({ isActive }) =>
@@ -144,7 +154,7 @@ const Layout = ({ children }) => {
 
       {/* ── Mobile bottom nav ─────────────────────────────────────────────── */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-card border-t flex items-center justify-around px-1 z-50">
-        {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
+        {visibleNavItems.map(({ path, label, icon: Icon }) => (
           <NavLink
             key={path}
             to={path}
