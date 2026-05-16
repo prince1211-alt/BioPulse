@@ -18,4 +18,15 @@ export const authApi = {
 
   // PATCH /auth/password
   changePassword: (data) => api.patch('/auth/password', data),
+
+  // PUT /auth/fcm-token
+  updateFcmToken: (fcm_token) => api.put('/auth/fcm-token', { fcm_token }),
+};
+
+export const notificationApi = {
+  // GET /notifications
+  getAll: () => api.get('/notifications'),
+
+  // PATCH /notifications/:id/read
+  markRead: (id) => api.patch(`/notifications/${id}/read`),
 };

@@ -7,16 +7,14 @@ export const appointmentApi = {
   getDoctors: (specialisation) =>
     api.get('/appointments/doctors', { params: specialisation ? { specialisation } : {} }),
 
-  // GET /appointments/doctors/:id/slots
-  getDoctorSlots: (doctorId) => api.get(`/appointments/doctors/${doctorId}/slots`),
+  // GET /appointments/doctors/:id/schedules
+  getDoctorSchedules: (doctorId) => api.get(`/appointments/doctors/${doctorId}/schedules`),
 
-  // POST /appointments/doctors/slots  (doctor only)
-  // body: { slots: ['2025-05-01T09:00:00Z', ...] }
-  addSlots: (data) => api.post('/appointments/doctors/slots', data),
+  // POST /appointments/doctors/schedules  (doctor only)
+  addSchedule: (data) => api.post('/appointments/doctors/schedules', data),
 
-  // DELETE /appointments/doctors/slots  (doctor only)
-  // body: { slot: '2025-05-01T09:00:00Z' }
-  removeSlot: (slot) => api.delete('/appointments/doctors/slots', { data: { slot } }),
+  // DELETE /appointments/doctors/schedules  (doctor only)
+  removeSchedule: (id) => api.delete('/appointments/doctors/schedules', { data: { id } }),
 
   // ── Appointments ─────────────────────────────────────────────────────────────
 
