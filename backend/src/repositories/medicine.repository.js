@@ -38,8 +38,6 @@ export const findActiveMedicinesAll = async (userId) => {
   return await Medicine.find({ user_id: userId, is_active: true }).lean();
 };
 
-// ── MedicineLog ──────────────────────────────────────────────────────────────
-
 export const findLogsForDay = async (userId, start, end) => {
   return await MedicineLog.find({
     user_id: userId,
@@ -65,6 +63,6 @@ export const upsertDoseLog = async (medicineId, scheduledAt, userId, status, not
       taken_at: status === 'taken' ? new Date() : null,
       user_id: userId,
     },
-    { new: true, upsert: true }
+    { returnDocument: 'after', upsert: true }
   );
 };

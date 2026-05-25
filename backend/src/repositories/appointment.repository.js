@@ -1,7 +1,6 @@
-import { Appointment, Doctor } from '../models/Appointment.js';
+import { Appointment } from '../models/Appointment.js';
 import { User } from '../models/User.js';
-
-// ── Appointment ──────────────────────────────────────────────────────────────
+import { Schedule } from '../models/Schedule.js';
 
 export const findAppointmentsByUser = async (userId, userRole) => {
   const filter = userRole === 'doctor' ? { doctor_id: userId } : { user_id: userId };
@@ -26,7 +25,9 @@ export const findConflictingAppointment = async (doctorId, scheduledAt, excludeI
   return await Appointment.findOne(filter);
 };
 
-// ── Doctor ───────────────────────────────────────────────────────────────────
+export const countAppointments = async (filter) => {
+  return await Appointment.countDocuments(filter);
+};
 
 export const findDoctorsList = async (filter) => {
   return await User.find({ role: 'doctor', ...filter })
@@ -35,13 +36,37 @@ export const findDoctorsList = async (filter) => {
 };
 
 export const findDoctorById = async (doctorId) => {
-  return await Doctor.findById(doctorId);
+  return await User.findOne({ _id: doctorId, role: 'doctor' });
 };
 
-export const findOrCreateDoctor = async (doctorId) => {
-  let doc = await Doctor.findById(doctorId);
-  if (!doc) {
-    doc = new Doctor({ _id: doctorId, available_slots: [] });
-  }
-  return doc;
+export const createSchedule = async (data) => {
+  return await Schedule.create(data);
+};
+
+export const findSchedulesByDoctor = async (doctorId) => {
+  return await Schedule.find({ doctor_id: doctorId }).sort({ date: 1, start_time: 1 });
+};
+
+export const findScheduleByIdAndDoctor = async (scheduleId, doctorId) => {
+  return await Schedule.findOne({ _id: scheduleId, doctor_id: doctorId });
+};
+
+export const deleteSchedule = async (scheduleId) => {
+  return await Schedule.findByIdAndDelete(scheduleId);
+};
+
+export const findScheduleForSlot = async (doctorId, dateString) => {
+  
+  return await Schedule.findOne({
+    doctor_id: doctorId,
+    date: dateString,
+  });
+};
+
+export const updateSlotBookingCount = async (scheduleId, slotId, increment) => {
+  return await Schedule.findOneAndUpdate(
+    { _id: scheduleId, 'slots._id': slotId },
+    { $inc: { 'slots.$.booked': increment } },
+    { returnDocument: 'after' }
+  );
 };
