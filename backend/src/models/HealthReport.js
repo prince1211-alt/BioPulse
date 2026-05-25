@@ -46,7 +46,7 @@ const healthReportSchema = new mongoose.Schema(
     },
     ai_summary: {
       type: String,
-      maxlength: 5000,
+      maxlength: 50000,
     },
     ai_insights: {
       type: mongoose.Schema.Types.Mixed,
@@ -64,7 +64,7 @@ const healthReportSchema = new mongoose.Schema(
     },
     risk_label: {
       type: String,
-      enum: ['low', 'moderate', 'high', 'critical'],
+      enum: ['minimal', 'low', 'moderate', 'high', 'critical'],
     },
     trends: {
       type: mongoose.Schema.Types.Mixed,
