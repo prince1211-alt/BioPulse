@@ -1,27 +1,24 @@
 import mongoose from 'mongoose';
 
-const mealSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-    },
-    calories: {
-      type: Number,
-    },
-    macros: {
-      protein: {
-        type: Number,
-      },
-      carbs: {
-        type: Number,
-      },
-      fat: {
-        type: Number,
-      },
-    },
+const mealItemSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true
   },
-  { _id: false }
-);
+  calories: {
+    type: Number,
+    required: true
+  },
+  macros: {
+    protein: { type: Number, default: 0 },
+    carbs: { type: Number, default: 0 },
+    fat: { type: Number, default: 0 },
+  },
+  quantity: {
+    type: Number,
+    default: 1
+  }
+});
 
 const dayPlanSchema = new mongoose.Schema(
   {
@@ -29,10 +26,10 @@ const dayPlanSchema = new mongoose.Schema(
       type: String,
     },
     meals: {
-      breakfast: mealSchema,
-      lunch: mealSchema,
-      snack: mealSchema,
-      dinner: mealSchema,
+      breakfast: [mealItemSchema],
+      lunch: [mealItemSchema],
+      snack: [mealItemSchema],
+      dinner: [mealItemSchema],
     },
   },
   { _id: false }
@@ -52,6 +49,20 @@ const dietPlanSchema = new mongoose.Schema(
     total_calories: {
       type: Number,
       required: true,
+    },
+    
+    patient_type: {
+      type: String,
+      default: 'general',
+    },
+    goal: {
+      type: String,
+    },
+    bmr: {
+      type: Number,
+    },
+    notes: {
+      type: String,
     },
     ai_generated: {
       type: Boolean,
