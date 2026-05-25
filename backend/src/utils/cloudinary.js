@@ -2,8 +2,6 @@ import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import multer from 'multer';
 
-// Cloudinary config will be picked up from process.env.CLOUDINARY_URL
-// Or we can explicitly configure it if env vars are separate
 if (process.env.CLOUDINARY_CLOUD_NAME) {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -12,7 +10,6 @@ if (process.env.CLOUDINARY_CLOUD_NAME) {
   });
 }
 
-// Storage engine
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {

@@ -1,7 +1,5 @@
 import admin from 'firebase-admin';
 
-// ─── Init ──────────────────────────────────────────────────────────────────────
-
 let isInitialized = false;
 
 try {
@@ -22,7 +20,7 @@ try {
           credential: admin.credential.cert({
             projectId,
             clientEmail,
-            // Automatically unescape newlines
+            
             privateKey: privateKey.replace(/\\n/g, '\n'),
           }),
         });
@@ -39,14 +37,6 @@ try {
   console.warn('⚠️  [FCM] Firebase init failed:', e.message);
 }
 
-// ─── sendPushNotification ─────────────────────────────────────────────────────
-
-/**
- * @param {string} token      - FCM device token
- * @param {string} title      - notification title
- * @param {string} body       - notification body
- * @param {object} [data]     - optional key-value string payload for the app
- */
 export const sendPushNotification = async (token, title, body, data = {}) => {
   if (!token) {
     console.warn('[FCM] Skipped — no device token provided');
@@ -58,7 +48,6 @@ export const sendPushNotification = async (token, title, body, data = {}) => {
     return;
   }
 
-  // FCM data values must all be strings
   const stringData = Object.fromEntries(
     Object.entries(data).map(([k, v]) => [k, String(v)])
   );
@@ -80,10 +69,10 @@ export const sendPushNotification = async (token, title, body, data = {}) => {
     const response = await admin.messaging().send(message);
     console.log(`✅ [FCM] Sent → ${token.slice(0, 20)}... | messageId: ${response}`);
   } catch (err) {
-    // UNREGISTERED token — the user uninstalled the app; clear their token
+    
     if (err.code === 'messaging/registration-token-not-registered') {
       console.warn(`[FCM] Token unregistered — clearing: ${token.slice(0, 20)}...`);
-      // Lazily import to avoid circular deps
+      
       try {
         const { User } = await import('../models/User.js');
         await User.updateOne({ fcm_token: token }, { $unset: { fcm_token: '' } });
@@ -93,7 +82,6 @@ export const sendPushNotification = async (token, title, body, data = {}) => {
       return;
     }
 
-    // Any other error — log but never throw (must not crash workers)
     console.error(`❌ [FCM] Failed → ${token.slice(0, 20)}...:`, err.message);
   }
 };

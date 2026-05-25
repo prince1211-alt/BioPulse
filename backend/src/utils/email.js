@@ -1,23 +1,20 @@
 import nodemailer from 'nodemailer';
 import { env } from '../config/env.js';
 
-// ─── Transporter ──────────────────────────────────────────────────────────────
-
 const transporter = nodemailer.createTransport({
   host:   env.SMTP_HOST,
   port:   parseInt(env.SMTP_PORT, 10),
-  secure: env.SMTP_PORT === '465', // true for port 465, STARTTLS for 587
+  secure: env.SMTP_PORT === '465', 
   auth: {
     user: env.SMTP_USER,
     pass: env.SMTP_PASS,
   },
-  // Prevent hanging connections
+  
   connectionTimeout: 10_000,
   greetingTimeout:   5_000,
   socketTimeout:     10_000,
 });
 
-// Verify transporter config on startup (non-blocking)
 if (env.NODE_ENV !== 'test') {
   transporter.verify().catch((err) => {
     console.warn('⚠️  [Email] SMTP connection check failed:', err.message);
@@ -25,14 +22,6 @@ if (env.NODE_ENV !== 'test') {
   });
 }
 
-// ─── sendEmail ────────────────────────────────────────────────────────────────
-
-/**
- * @param {string} to       - recipient email
- * @param {string} subject
- * @param {string} html     - HTML body
- * @param {string} [text]   - plain-text fallback (auto-generated if omitted)
- */
 export const sendEmail = async (to, subject, html, text) => {
   if (env.NODE_ENV === 'test') return;
 
@@ -88,6 +77,28 @@ export const emailTemplates = {
         <h2 style="color:#dc2626">⚠️ Low Stock Warning</h2>
         <p><strong>${medicineName}</strong> is running low — only <strong>${remaining}</strong> dose(s) remaining.</p>
         <p>Please refill soon to avoid missing doses.</p>
+        <p style="color:#6b7280;font-size:12px">BioPulse Health</p>
+      </div>`,
+  }),
+
+  dietReminder: (mealName) => ({
+    subject: '🥗 BioPulse — Meal Reminder',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#10b981">🥗 Time for your meal</h2>
+        <p>It's time for your scheduled meal: <strong>${mealName}</strong>.</p>
+        <p>Stay hydrated and maintain your diet plan!</p>
+        <p style="color:#6b7280;font-size:12px">BioPulse Health</p>
+      </div>`,
+  }),
+
+  reportReady: () => ({
+    subject: '📄 BioPulse — Report Analysis Completed',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#8b5cf6">📄 Medical Report Analysis Ready</h2>
+        <p>Your medical report analysis is now ready.</p>
+        <p>Please log in to your BioPulse dashboard to view the insights and AI recommendations.</p>
         <p style="color:#6b7280;font-size:12px">BioPulse Health</p>
       </div>`,
   }),

@@ -5,8 +5,6 @@ const USDA_BASE_URL = 'https://api.nal.usda.gov/fdc/v1/foods/search';
 const TIMEOUT_MS    = 8000;
 const MAX_RETRIES   = 2;
 
-// ─── Nutrient name → short key ────────────────────────────────────────────────
-
 const NUTRIENT_MAP = {
   'Energy':                       'calories',
   'Protein':                      'protein',
@@ -20,13 +18,6 @@ const NUTRIENT_MAP = {
 const getNutrient = (nutrients, name) =>
   nutrients.find((n) => n.nutrientName === name)?.value ?? 0;
 
-// ─── searchFoodsFromAPI ───────────────────────────────────────────────────────
-
-/**
- * @param {string} query     - search term (min 2 chars)
- * @param {number} [pageSize=10]
- * @returns {Promise<Array>}
- */
 export const searchFoodsFromAPI = async (query, pageSize = 10) => {
   if (!query || query.trim().length < 2) return [];
 
@@ -45,7 +36,7 @@ export const searchFoodsFromAPI = async (query, pageSize = 10) => {
           api_key:  apiKey,
           query:    query.trim(),
           pageSize: Math.min(pageSize, 25),
-          dataType: 'Foundation,SR Legacy', // prefer verified nutrient data
+          dataType: 'Foundation,SR Legacy', 
         },
         timeout: TIMEOUT_MS,
       });
@@ -74,7 +65,6 @@ export const searchFoodsFromAPI = async (query, pageSize = 10) => {
     } catch (err) {
       lastErr = err;
 
-      // Don't retry on 4xx (bad key, bad query) — only on network / 5xx
       if (err.response?.status >= 400 && err.response?.status < 500) break;
 
       if (attempt < MAX_RETRIES) {
