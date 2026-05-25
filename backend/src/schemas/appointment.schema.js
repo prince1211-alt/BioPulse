@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const bookAppointmentSchema = z.object({
   doctor_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID'),
   scheduled_at: z.string().datetime(),
-  // FIX: added 'consultation' and 'follow-up' which are used in the controller and frontend
+  
   type: z.enum(['checkup', 'follow-up', 'consultation', 'lab']),
   notes: z.string().optional(),
 });
@@ -22,10 +22,14 @@ export const updateStatusSchema = z.object({
   status: z.enum(['completed', 'no_show']),
 });
 
-export const addSlotsSchema = z.object({
-  slots: z.array(z.string().datetime()).min(1, 'slots array is required'),
+export const addScheduleSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+  start_time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Start time must be HH:mm'),
+  end_time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'End time must be HH:mm'),
+  slot_duration: z.number().int().min(5, 'Duration must be at least 5 minutes').max(120),
+  max_patients: z.number().int().min(1, 'At least 1 patient per slot required').default(1),
 });
 
-export const removeSlotSchema = z.object({
-  slot: z.string().datetime(),
+export const removeScheduleSchema = z.object({
+  id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid Schedule ID'),
 });
