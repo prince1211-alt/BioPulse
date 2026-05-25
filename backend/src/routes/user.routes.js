@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProfile, updateProfile, getDoctorProfile, getAllUsers, getUserById, deleteAccount } from '../controllers/user.controller.js';
+import { getProfile, updateProfile, getDoctorProfile, getAllUsers, getUserById, deleteAccount, getPatientHistory } from '../controllers/user.controller.js';
 import { banUser } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth_middleware.js';
 import { validate } from '../middleware/validate.js';
@@ -17,6 +17,7 @@ router.delete('/me', deleteAccount);
 
 router.get('/', getAllUsers);
 router.get('/:userId', getUserById);
+router.get('/:userId/history', getPatientHistory);
 router.patch('/:userId/ban', banUser);
 
 export default router;

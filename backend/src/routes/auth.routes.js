@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { register, login, logout, refreshAccessToken, changePassword, verifyAuth } from '../controllers/auth.controller.js';
+import { register, login, logout, refreshAccessToken, changePassword, verifyAuth, updateFcmToken } from '../controllers/auth.controller.js';
 import { validate } from '../middleware/validate.js';
-import { registerSchema, loginSchema, changePasswordSchema } from '../schemas/auth.schema.js';
+import { registerSchema, loginSchema, changePasswordSchema, updateFcmTokenSchema } from '../schemas/auth.schema.js';
 import { authenticate } from '../middleware/auth_middleware.js';
 
 const router = Router();
@@ -12,5 +12,6 @@ router.post('/logout', authenticate, logout);
 router.post('/refresh', refreshAccessToken);
 router.patch('/password', authenticate, validate(changePasswordSchema), changePassword);
 router.get('/me', authenticate, verifyAuth);
+router.put('/fcm-token', authenticate, validate(updateFcmTokenSchema), updateFcmToken);
 
 export default router;
