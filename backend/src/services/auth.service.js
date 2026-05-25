@@ -56,7 +56,7 @@ export const registerUser = async (data) => {
 export const loginUser = async (email, password) => {
   const user = await User.findOne({ email: email.toLowerCase() });
   if (!user) {
-    await bcrypt.hash(password, 10); // Timing attack prevention
+    await bcrypt.hash(password, 10); 
     throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
   }
 
@@ -108,7 +108,7 @@ export const refreshUserToken = async (token) => {
 
   const isMatch = await bcrypt.compare(token, user.refresh_token);
   if (!isMatch) {
-    // Token reuse detected - invalidate all sessions
+    
     await User.findByIdAndUpdate(user._id, { refresh_token: null });
     throw new AppError('Token reuse detected, please login again', 401, 'TOKEN_REUSE');
   }
@@ -140,7 +140,7 @@ export const changeUserPassword = async (userId, current_password, new_password)
   }
 
   user.password_hash = await bcrypt.hash(new_password, 10);
-  user.refresh_token = null; // Invalidate sessions
+  user.refresh_token = null; 
   await user.save();
 };
 
@@ -164,4 +164,12 @@ export const banUnbanUser = async (userId, ban) => {
   }
 
   return user;
+};
+
+export const updateFcmToken = async (userId, fcm_token) => {
+  const user = await User.findByIdAndUpdate(userId, { fcm_token }, { new: true });
+  if (!user) {
+    throw new AppError('User not found', 404, 'NOT_FOUND');
+  }
+  return { success: true };
 };
