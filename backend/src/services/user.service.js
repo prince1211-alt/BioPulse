@@ -1,5 +1,9 @@
 import { AppError } from '../utils/AppError.js';
 import * as userRepo from '../repositories/user.repository.js';
+import { HealthReport } from '../models/HealthReport.js';
+import { Prescription } from '../models/Prescription.js';
+import { Appointment } from '../models/Appointment.js';
+import { Medicine } from '../models/Medicine.js';
 
 const PATIENT_ALLOWED_FIELDS = [
   'name', 'age', 'gender', 'height', 'weight',
@@ -59,4 +63,22 @@ export const deleteUserAccount = async (userId) => {
   const user = await userRepo.deleteUserById(userId);
   if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
   return user;
+};
+
+export const getPatientHistory = async (patientId) => {
+  const user = await userRepo.findUserById(patientId, '-password_hash -refresh_token');
+  if (!user) throw new AppError('Patient not found', 404, 'NOT_FOUND');
+  
+  const reports = await HealthReport.find({ user_id: patientId }).sort({ report_date: -1 }).lean();
+  const prescriptions = await Prescription.find({ patient_id: patientId, is_template: false }).populate('doctor_id', 'name specialisation qualification').sort({ createdAt: -1 }).lean();
+  const appointments = await Appointment.find({ user_id: patientId }).populate('doctor_id', 'name specialisation').sort({ scheduled_at: -1 }).lean();
+  const medicines = await Medicine.find({ user_id: patientId }).sort({ start_date: -1 }).lean();
+
+  return {
+    patient: user,
+    reports,
+    prescriptions,
+    appointments,
+    medicines
+  };
 };
