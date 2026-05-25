@@ -6,3 +6,4 @@ export const appointmentReminderQueue = new Queue('appointment-reminders', { con
 export const ocrQueue = new Queue('report-ocr', { connection: redisConnection });
 export const aiAnalysisQueue = new Queue('report-ai-analysis', { connection: redisConnection });
 export const stockCheckQueue = new Queue('low-stock-check', { connection: redisConnection });
+export const dietReminderQueue = new Queue('diet-reminders', { connection: redisConnection });
