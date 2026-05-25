@@ -42,7 +42,6 @@ const userSchema = new mongoose.Schema(
       type: String,
     },
 
-    // ── Patient specific fields ──
     age: {
       type: Number,
     },
@@ -64,7 +63,6 @@ const userSchema = new mongoose.Schema(
       type: Number,
     },
 
-    // ── Doctor specific fields ──
     specialisation: {
       type: String,
     },
