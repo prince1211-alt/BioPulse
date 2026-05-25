@@ -2,6 +2,15 @@ import { success } from '../utils/response.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import * as reportService from '../services/report.service.js';
 
+function noCache(res) {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma':        'no-cache',
+    'Expires':       '0',
+  });
+  return res;
+}
+
 export const uploadReport = asyncHandler(async (req, res) => {
   if (!req.file) {
     return success(res, null, 'No file provided', 400);
@@ -22,12 +31,12 @@ export const getReportById = asyncHandler(async (req, res) => {
 
 export const getReportStatus = asyncHandler(async (req, res) => {
   const status = await reportService.getReportStatus(req.userId, req.params.id);
-  return success(res, status);
+  return success(noCache(res), status);
 });
 
 export const reanalyzeReport = asyncHandler(async (req, res) => {
   const result = await reportService.reanalyzeReport(req.userId, req.params.id);
-  return success(res, result);
+  return success(noCache(res), result);
 });
 
 export const deleteReport = asyncHandler(async (req, res) => {
