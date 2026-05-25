@@ -1,9 +1,10 @@
 import { Worker } from 'bullmq';
 import sharp from 'sharp';
 import { redisConnection } from '../config/redis.js';
+import connectDB from '../config/db.js';
 
-import { sendEmail, emailTemplates } from '../utils/email.js';
-import { sendPushNotification } from '../utils/fcm.js';
+import { emailTemplates } from '../utils/email.js';
+import { dispatchNotification } from '../services/notification.service.js';
 import { aiAnalysisQueue } from '../queues/index.js';
 
 import { Medicine } from '../models/Medicine.js';
@@ -24,63 +25,39 @@ import {
   getRiskLabel,
 } from '../controllers/aiSystem.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// QUEUE NAMES — must match exactly what queues/index.js exports
-// ─────────────────────────────────────────────────────────────────────────────
 const QUEUES = {
   MEDICINE:    'medicine-reminders',
   APPOINTMENT: 'appointment-reminders',
   OCR:         'report-ocr',
   AI:          'report-ai-analysis',
   STOCK:       'low-stock-check',
+  DIET:        'diet-reminders',
 };
 
-// ─── Helper: emit socket notification ────────────────────────────────────────
+const log = {
+  info:  (ctx, msg, data = {}) => console.log(JSON.stringify({ level: 'info',  ctx, msg, ...data, ts: new Date().toISOString() })),
+  warn:  (ctx, msg, data = {}) => console.warn(JSON.stringify({ level: 'warn',  ctx, msg, ...data, ts: new Date().toISOString() })),
+  error: (ctx, msg, data = {}) => console.error(JSON.stringify({ level: 'error', ctx, msg, ...data, ts: new Date().toISOString() })),
+};
 
-async function emitSocket(userId, payload) {
-  try {
-    const { getIO } = await import('../config/socket.js');
-    getIO().to(userId).emit('notification', { ...payload, time: new Date() });
-  } catch {
-    // Socket is optional — never crash workers over it
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// OCR HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * cleanText — sanitise raw OCR output.
- * NOTE: The original replaced ALL letter 'O' with '0' which corrupted words
- * like "glucose" → "gl0c0se". Removed that — OCR is already pretty good.
- */
 function cleanText(text) {
-  return text
-    .replace(/[^\x00-\x7F]/g, ' ') // strip non-ASCII
-    .replace(/\s+/g, ' ')
-    .trim();
+  return text.replace(/[^\x00-\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeUnit(unit) {
   if (!unit) return null;
   const u = unit.toLowerCase();
-  if (u.includes('mg'))             return 'mg/dl';
-  if (u.includes('mmol'))           return 'mmol/l';
+  if (u.includes('mg'))                        return 'mg/dl';
+  if (u.includes('mmol'))                      return 'mmol/l';
   if (u.includes('µmol') || u.includes('umol')) return 'µmol/l';
-  if (u.includes('%'))              return '%';
+  if (u.includes('%'))                         return '%';
   return u;
 }
 
 function extractValue(patterns, text) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
-    if (match) {
-      return {
-        value: parseFloat(match[1]),
-        unit:  normalizeUnit(match[2] || null),
-      };
-    }
+    if (match) return { value: parseFloat(match[1]), unit: normalizeUnit(match[2] || null) };
   }
   return null;
 }
@@ -88,9 +65,9 @@ function extractValue(patterns, text) {
 function convert(value, unit, type) {
   if (value == null) return null;
   switch (type) {
-    case 'glucose':     return unit === 'mmol/l' ? value * 18.018  : value;
-    case 'cholesterol': return unit === 'mmol/l' ? value * 38.67   : value;
-    case 'creatinine':  return unit === 'µmol/l' ? value / 88.4    : value;
+    case 'glucose':     return unit === 'mmol/l' ? value * 18.018 : value;
+    case 'cholesterol': return unit === 'mmol/l' ? value * 38.67  : value;
+    case 'creatinine':  return unit === 'µmol/l' ? value / 88.4   : value;
     default:            return value;
   }
 }
@@ -98,441 +75,392 @@ function convert(value, unit, type) {
 function buildField(patterns, text, type = null) {
   const raw = extractValue(patterns, text);
   if (!raw) return null;
-  return {
-    original: raw,
-    standard: type ? convert(raw.value, raw.unit, type) : raw.value,
-  };
+  return { original: raw, standard: type ? convert(raw.value, raw.unit, type) : raw.value };
 }
 
-/**
- * Determine whether a report file is PDF from the stored contentType field.
- * Falls back to URL extension check.
- */
 function isPdf(report) {
   if (report.content_type) return report.content_type === 'application/pdf';
   return report.file_url?.toLowerCase().includes('.pdf');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WORKER DEFINITIONS
-// ─────────────────────────────────────────────────────────────────────────────
+function countNonNull(obj, depth = 0) {
+  if (depth > 5) return 0;
+  let count = 0;
+  for (const val of Object.values(obj)) {
+    if (val !== null && val !== undefined)
+      count += typeof val === 'object' ? countNonNull(val, depth + 1) : 1;
+  }
+  return count;
+}
 
-export const startWorkers = () => {
+export const startWorkers = async () => {
+  
+  await connectDB();
+  console.log('✅ Workers connected to Database');
+
   const workers = [];
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 💊 MEDICINE REMINDER WORKER
-  // ═══════════════════════════════════════════════════════════════════════════
   workers.push(
     new Worker(
       QUEUES.MEDICINE,
       async (job) => {
         const { medicineId, userId, time } = job.data;
-        console.log(`💊 [MedWorker] job=${job.id} medicine=${medicineId}`);
+        log.info('MedWorker', 'Processing', { jobId: job.id, medicineId });
 
         const [medicine, user] = await Promise.all([
           Medicine.findById(medicineId).lean(),
           User.findById(userId).lean(),
         ]);
 
-        if (!medicine || !medicine.is_active) {
-          console.log(`[MedWorker] Skipped — medicine inactive or not found`);
-          return;
-        }
-        if (!user) {
-          console.log(`[MedWorker] Skipped — user not found`);
-          return;
-        }
+        if (!medicine || !medicine.is_active) { log.warn('MedWorker', 'Skipped — inactive', { medicineId }); return; }
+        if (!user)                             { log.warn('MedWorker', 'Skipped — no user',   { userId });    return; }
 
         const doseStr = `${medicine.dosage}${medicine.unit ? ' ' + medicine.unit : ''}`;
-        const msg     = `Take ${doseStr} of ${medicine.name}`;
+        const msg     = `It's time to take your medicine: ${medicine.name} (${doseStr}).`;
 
-        // Email
-        if (user.email) {
-          const tpl = emailTemplates.medicineReminder(medicine.name, doseStr);
-          await sendEmail(user.email, tpl.subject, tpl.html);
-        }
+        await dispatchNotification({
+          userId: String(userId),
+          title: 'Medicine Reminder',
+          body: msg,
+          type: 'medicine',
+          metadata: { medicineId: String(medicineId), scheduledAt: time },
+          emailOpts: user.email ? emailTemplates.medicineReminder(medicine.name, doseStr) : null,
+        });
 
-        // Push notification
-        if (user.fcm_token) {
-          await sendPushNotification(user.fcm_token, '💊 Medicine Reminder', msg, {
-            type:        'medicine',
-            medicineId:  medicineId.toString(),
-            scheduledAt: time,
-          });
-        }
-
-        // Real-time socket
-        await emitSocket(userId, { type: 'medicine', message: msg });
-
-        console.log(`✅ [MedWorker] Reminder sent → user=${userId}`);
+        log.info('MedWorker', 'Done', { userId });
       },
       { connection: redisConnection, concurrency: 5 }
     )
   );
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 📅 APPOINTMENT REMINDER WORKER
-  // ═══════════════════════════════════════════════════════════════════════════
   workers.push(
     new Worker(
       QUEUES.APPOINTMENT,
       async (job) => {
         const { appointmentId, userId, type } = job.data;
-        console.log(`📅 [ApptWorker] job=${job.id} appt=${appointmentId} type=${type}`);
+        log.info('ApptWorker', 'Processing', { jobId: job.id, appointmentId, type });
 
         const [appointment, user] = await Promise.all([
           Appointment.findById(appointmentId).populate('doctor_id', 'name specialisation').lean(),
           User.findById(userId).lean(),
         ]);
 
-        if (!appointment) {
-          console.log('[ApptWorker] Skipped — appointment not found');
-          return;
-        }
-        if (appointment.status === 'cancelled') {
-          console.log('[ApptWorker] Skipped — appointment was cancelled');
-          return;
-        }
-        if (new Date(appointment.scheduled_at).getTime() < Date.now()) {
-          console.log('[ApptWorker] Skipped — appointment already past');
-          return;
-        }
-        if (!user) {
-          console.log('[ApptWorker] Skipped — user not found');
-          return;
-        }
+        if (!appointment)                                         { log.warn('ApptWorker', 'No appointment', { appointmentId }); return; }
+        if (appointment.status === 'cancelled')                   { log.warn('ApptWorker', 'Cancelled',      { appointmentId }); return; }
+        if (new Date(appointment.scheduled_at).getTime() < Date.now()) { log.warn('ApptWorker', 'Past',       { appointmentId }); return; }
+        if (!user)                                                { log.warn('ApptWorker', 'No user',         { userId });        return; }
 
         const doctorName = appointment.doctor_id?.name || 'your doctor';
+        const msgMap = { '24h': `You have an appointment scheduled with Dr. ${doctorName} tomorrow.`, '1h': `You have an appointment scheduled with Dr. ${doctorName} in 1 hour.` };
+        const msg    = msgMap[type] || `You have an appointment scheduled with Dr. ${doctorName} coming up.`;
 
-        const msgMap = {
-          '24h': `Your appointment with Dr. ${doctorName} is tomorrow.`,
-          '1h':  `Your appointment with Dr. ${doctorName} is in 1 hour.`,
-        };
-        const msg = msgMap[type] || `Appointment with Dr. ${doctorName} coming up.`;
+        await dispatchNotification({
+          userId: String(userId),
+          title: 'Appointment Reminder',
+          body: msg,
+          type: 'appointment',
+          metadata: { appointmentId: String(appointmentId) },
+          emailOpts: user.email ? emailTemplates.appointmentReminder(doctorName, appointment.scheduled_at, appointment.type) : null,
+        });
 
-        // Email
-        if (user.email) {
-          const tpl = emailTemplates.appointmentReminder(
-            doctorName,
-            appointment.scheduled_at,
-            appointment.type
-          );
-          await sendEmail(user.email, tpl.subject, tpl.html);
-        }
-
-        // Push
-        if (user.fcm_token) {
-          await sendPushNotification(user.fcm_token, '📅 Appointment Reminder', msg, {
-            type:          'appointment',
-            appointmentId: appointmentId.toString(),
-          });
-        }
-
-        // Socket
-        await emitSocket(userId, { type: 'appointment', message: msg });
-
-        console.log(`✅ [ApptWorker] Reminder sent → user=${userId} | type=${type}`);
+        log.info('ApptWorker', 'Done', { userId, type });
       },
       { connection: redisConnection, concurrency: 5 }
     )
   );
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 🔬 OCR WORKER
-  // ═══════════════════════════════════════════════════════════════════════════
   workers.push(
     new Worker(
       QUEUES.OCR,
       async (job) => {
         const { reportId } = job.data;
-        console.log(`🔬 [OCRWorker] job=${job.id} report=${reportId}`);
+        log.info('OCRWorker', 'Job started', { jobId: job.id, reportId });
 
         const report = await HealthReport.findById(reportId);
-        if (!report) throw new Error(`Report not found: ${reportId}`);
+        if (!report) {
+          log.error('OCRWorker', 'Report not found — skipping', { reportId });
+          return; 
+        }
 
-        // Mark as processing
-        report.ocr_status = 'processing';
-        await report.save();
+        if (report.ocr_status === 'done') {
+          log.warn('OCRWorker', 'OCR already done, triggering AI analysis directly', { reportId });
+          await _triggerAIAnalysis(reportId);
+          return;
+        }
 
-        // Download file from S3 / CDN
+        await HealthReport.findByIdAndUpdate(reportId, {
+          ocr_status:         'processing',
+          ocr_started_at:     new Date(),
+          ocr_attempt:        (report.ocr_attempt || 0) + 1,
+        });
+
+        log.info('OCRWorker', 'Status set to processing', { reportId, fileUrl: report.file_url });
+
         let buffer;
         try {
           const response = await axios.get(report.file_url, {
             responseType: 'arraybuffer',
-            timeout:       30_000,
+            timeout:       60_000, 
           });
           buffer = Buffer.from(response.data);
+          log.info('OCRWorker', 'File downloaded', { reportId, bytes: buffer.length });
         } catch (err) {
-          throw new Error(`Failed to download report file: ${err.message}`);
+          
+          await HealthReport.findByIdAndUpdate(reportId, {
+            ocr_status:    'failed',
+            error_message: `Download failed: ${err.message}`,
+          });
+          log.error('OCRWorker', 'Download failed', { reportId, err: err.message });
+          throw err; 
         }
 
-        // Extract text
         let text = '';
+        let extractionMethod = 'unknown';
+
         if (isPdf(report)) {
+          log.info('OCRWorker', 'Using PDF extraction', { reportId });
           try {
             const parsed = await pdfParse(buffer);
             text = parsed.text || '';
+            extractionMethod = 'pdf-parse';
+            log.info('OCRWorker', 'pdf-parse result', { reportId, chars: text.length });
 
-            // If PDF text layer is empty/thin, fall back to Tesseract
             if (text.trim().length < 30) {
+              log.warn('OCRWorker', 'PDF text layer thin, falling back to Tesseract', { reportId });
               const result = await Tesseract.recognize(buffer, 'eng', { logger: () => {} });
               text = result.data.text;
+              extractionMethod = 'tesseract-pdf-fallback';
+              log.info('OCRWorker', 'Tesseract fallback result', { reportId, chars: text.length });
             }
-          } catch {
-            // pdfParse can fail on scanned PDFs — use Tesseract
+          } catch (pdfErr) {
+            log.warn('OCRWorker', 'pdfParse threw, using Tesseract', { reportId, err: pdfErr.message });
             const result = await Tesseract.recognize(buffer, 'eng', { logger: () => {} });
             text = result.data.text;
+            extractionMethod = 'tesseract-pdf-scan';
           }
         } else {
-          // ─── Sharp Image Preprocessing Pipeline ────────────
+          log.info('OCRWorker', 'Using image OCR', { reportId });
           try {
+
             const preprocessedBuffer = await sharp(buffer)
-              .resize({ width: 2000, withoutEnlargement: true }) // Scale for OCR clarity
-              .grayscale() // Convert to grayscale
-              .normalize() // Stretch contrast (thresholding equivalent)
-              .median(3) // Noise reduction
+              .resize({ width: 1400, withoutEnlargement: true })
+              .grayscale()
+              .normalize()
+              .sharpen()
+              .threshold(128)
+              .png()
               .toBuffer();
-              
-            const result = await Tesseract.recognize(preprocessedBuffer, 'eng', { logger: () => {} });
+
+            const result = await Tesseract.recognize(preprocessedBuffer, 'eng', { 
+              logger: () => {},
+              tessedit_pageseg_mode: '4' 
+            });
             text = result.data.text;
+            extractionMethod = 'tesseract-sharp-opt';
+            log.info('OCRWorker', 'Sharp (Opt)+Tesseract result', { reportId, chars: text.length });
           } catch (sharpErr) {
-            console.error(`[OCRWorker] Sharp preprocessing failed: ${sharpErr.message}, falling back to raw buffer`);
+            log.warn('OCRWorker', 'Sharp failed, using raw buffer', { reportId, err: sharpErr.message });
             const result = await Tesseract.recognize(buffer, 'eng', { logger: () => {} });
             text = result.data.text;
+            extractionMethod = 'tesseract-raw';
           }
         }
 
         text = cleanText(text);
+        log.info('OCRWorker', 'Text extracted', { reportId, method: extractionMethod, chars: text.length, preview: text.slice(0, 120) });
 
-        // ── Biomarker Extraction ──────────────────────────────────────────────
+        if (text.trim().length === 0) {
+          log.warn('OCRWorker', 'Empty OCR output — marking failed', { reportId });
+          await HealthReport.findByIdAndUpdate(reportId, {
+            ocr_status:    'failed',
+            error_message: 'OCR produced no text. The file may be blank or corrupted.',
+          });
+          return; 
+        }
+
         const extractedData = {
           diabetes: {
-            hba1c: buildField(
-              [/HbA1c\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(%)?/i],
-              text
-            ),
-            glucose: buildField(
-              [/(?:Fasting\s+)?Glucose\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i],
-              text,
-              'glucose'
-            ),
+            hba1c:   buildField([/HbA1c\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(%)?/i], text),
+            glucose:  buildField([/(?:Fasting\s+)?Glucose\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'glucose'),
           },
-
           lipid: {
-            total_cholesterol: buildField(
-              [/Total\s+Cholesterol\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i],
-              text,
-              'cholesterol'
-            ),
-            ldl: buildField(
-              [/LDL(?:[- ]C(?:holesterol)?)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i],
-              text,
-              'cholesterol'
-            ),
-            hdl: buildField(
-              [/HDL(?:[- ]C(?:holesterol)?)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i],
-              text,
-              'cholesterol'
-            ),
-            triglycerides: buildField(
-              [/Triglycerides?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i],
-              text,
-              'cholesterol'
-            ),
+            total_cholesterol: buildField([/Total\s+Cholesterol\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
+            ldl:               buildField([/LDL(?:[- ]C(?:holesterol)?)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
+            hdl:               buildField([/HDL(?:[- ]C(?:holesterol)?)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
+            triglycerides:     buildField([/Triglycerides?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
           },
-
           kidney: {
-            creatinine: buildField(
-              [/Creatinine\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|µmol\/l|umol\/l)?/i],
-              text,
-              'creatinine'
-            ),
-            urea: buildField(
-              [/(?:Blood\s+)?Urea(?:\s+Nitrogen)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i],
-              text
-            ),
-            egfr: buildField(
-              [/eGFR\s*[:\-]?\s*(\d+(?:\.\d+)?)/i],
-              text
-            ),
+            creatinine: buildField([/Creatinine\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|µmol\/l|umol\/l)?/i], text, 'creatinine'),
+            urea:       buildField([/(?:Blood\s+)?Urea(?:\s+Nitrogen)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text),
+            egfr:       buildField([/eGFR\s*[:\-]?\s*(\d+(?:\.\d+)?)/i], text),
           },
-
           thyroid: {
-            tsh: buildField(
-              [/TSH\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mIU\/l|µIU\/ml|uIU\/ml)?/i],
-              text
-            ),
-            t3: buildField(
-              [/(?:Free\s+)?T3\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(pg\/ml|pmol\/l)?/i],
-              text
-            ),
-            t4: buildField(
-              [/(?:Free\s+)?T4\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(ng\/dl|pmol\/l)?/i],
-              text
-            ),
+            tsh: buildField([/TSH\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mIU\/l|µIU\/ml|uIU\/ml)?/i], text),
+            t3:  buildField([/(?:Free\s+)?T3\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(pg\/ml|pmol\/l)?/i], text),
+            t4:  buildField([/(?:Free\s+)?T4\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(ng\/dl|pmol\/l)?/i], text),
           },
-
           cbc: {
-            hemoglobin: buildField(
-              [/H(?:ae?mo)?globin\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(g\/dl|g\/l)?/i],
-              text
-            ),
-            wbc: buildField(
-              [/(?:WBC|White\s+Blood\s+Cell(?:s)?)\s*[:\-]?\s*(\d+(?:\.\d+)?)/i],
-              text
-            ),
-            platelets: buildField(
-              [/Platelet(?:s)?\s*(?:Count)?\s*[:\-]?\s*(\d+(?:\.\d+)?)/i],
-              text
-            ),
+            hemoglobin: buildField([/H(?:ae?mo)?globin\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(g\/dl|g\/l)?/i], text),
+            wbc:        buildField([/(?:WBC|White\s+Blood\s+Cell(?:s)?)\s*[:\-]?\s*(\d+(?:\.\d+)?)/i], text),
+            platelets:  buildField([/Platelet(?:s)?\s*(?:Count)?\s*[:\-]?\s*(\d+(?:\.\d+)?)/i], text),
           },
         };
 
-        // Count non-null fields as a confidence proxy
         const confidence = countNonNull(extractedData);
+        log.info('OCRWorker', 'Biomarker extraction done', { reportId, confidence, extractedData: JSON.stringify(extractedData) });
 
         await HealthReport.findByIdAndUpdate(reportId, {
-          ocr_status:             'done',
-          extracted_data:         extractedData,
-          raw_text:               text,
-          extraction_confidence:  confidence,
+          ocr_status:            'done',
+          ocr_completed_at:      new Date(),
+          extracted_data:        extractedData,
+          raw_text:              text,
+          extraction_confidence: confidence,
+          extraction_method:     extractionMethod,
         });
 
-        // Hand off to AI analysis queue
-        await aiAnalysisQueue.add(
-          'analyze-report',
-          { reportId: reportId.toString() },
-          {
-            jobId:           `analysis-${reportId}`,
-            attempts:        5,
-            backoff:         { type: 'exponential', delay: 3000 },
-            removeOnComplete: true,
-          }
-        );
+        log.info('OCRWorker', 'Saved to DB, triggering AI analysis', { reportId });
 
-        console.log(`✅ [OCRWorker] Done — confidence=${confidence} | report=${reportId}`);
+        await _triggerAIAnalysis(reportId);
+
+        log.info('OCRWorker', 'Complete', { reportId, confidence, method: extractionMethod });
       },
       { connection: redisConnection, concurrency: 2 }
     )
   );
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 🤖 AI ANALYSIS WORKER
-  // ═══════════════════════════════════════════════════════════════════════════
   workers.push(
     new Worker(
       QUEUES.AI,
       async (job) => {
         const { reportId } = job.data;
-        console.log(`🤖 [AIWorker] job=${job.id} report=${reportId}`);
+        log.info('AIWorker', 'Job started', { jobId: job.id, reportId });
 
         const report = await HealthReport.findById(reportId);
         if (!report) {
-          console.log('[AIWorker] Skipped — report not found');
+          log.warn('AIWorker', 'Report not found — skipping', { reportId });
           return;
         }
 
         if (report.ocr_status !== 'done') {
-          console.log('[AIWorker] Skipped — OCR not complete yet');
+          log.warn('AIWorker', 'OCR not complete — skipping', { reportId, ocr_status: report.ocr_status });
           return;
         }
 
-        // Mark processing so duplicate triggers are blocked
-        await HealthReport.findByIdAndUpdate(reportId, { analysis_status: 'processing' });
+        if (report.analysis_status === 'done') {
+          log.warn('AIWorker', 'Already done — skipping', { reportId });
+          return;
+        }
+
+        await HealthReport.findByIdAndUpdate(reportId, {
+          analysis_status:    'processing',
+          analysis_started_at: new Date(),
+        });
+
+        log.info('AIWorker', 'Status set to processing', { reportId });
 
         try {
           const data       = report.extracted_data;
           const riskScore  = calculateRiskScore(data);
-          const riskLabel  = getRiskLabel(riskScore);
-          const trend      = await getTrend(report);
-          const aiRaw      = await generateHealthInsights(data, report.raw_text || '');
+          const riskLabelObj = getRiskLabel(riskScore);
+          const riskLabel    = riskLabelObj.label; // serialize: Mongoose schema expects String
+          log.info('AIWorker', 'Risk score computed', { reportId, riskScore, riskLabel });
 
-          // Parse AI JSON safely
+          const trend = await getTrend(report);
+          log.info('AIWorker', 'Trend computed', { reportId, trend: JSON.stringify(trend) });
+
+          log.info('AIWorker', 'Calling Groq for health insights', { reportId, rawTextLen: (report.raw_text || '').length });
+          const aiRaw = await generateHealthInsights(data, report.raw_text || '');
+          log.info('AIWorker', 'Groq response received', { reportId, responseLen: aiRaw.length, preview: aiRaw.slice(0, 200) });
+
           let aiInsights = null;
           try {
             aiInsights = JSON.parse(aiRaw);
-          } catch {
-            aiInsights = { summary: aiRaw, parse_error: true };
+            log.info('AIWorker', 'AI response parsed successfully', { reportId, keys: Object.keys(aiInsights) });
+          } catch (parseErr) {
+            log.error('AIWorker', 'AI response JSON parse failed', { reportId, err: parseErr.message, rawSample: aiRaw.slice(0, 300) });
+            aiInsights = {
+              summary:     aiRaw,
+              parse_error: true,
+              raw:         aiRaw,
+            };
           }
 
           await HealthReport.findByIdAndUpdate(reportId, {
-            analysis_status: 'done',
-            // Store under ai_insights (consistent with report_controller.getReportStatus)
-            ai_insights:     aiInsights,
-            // Also keep raw string for backward compat
-            ai_summary:      typeof aiRaw === 'string' ? aiRaw : JSON.stringify(aiRaw),
-            risk_score:      riskScore,
-            risk_label:      riskLabel,
-            trends:          trend,
+            analysis_status:      'done',
+            analysis_completed_at: new Date(),
+            ai_insights:          aiInsights,
+            ai_summary:           typeof aiRaw === 'string' ? aiRaw : JSON.stringify(aiRaw),
+            risk_score:           riskScore,
+            risk_label:           riskLabel,
+            trends:               trend,
           });
 
-          // Notify the patient their report is ready
-          const user = await User.findById(report.user_id).lean();
-          if (user) {
-            await emitSocket(report.user_id.toString(), {
-              type:        'report_ready',
-              message:     'Your health report analysis is complete.',
-              reportId:    reportId.toString(),
-              risk_score:  riskScore,
-              risk_label:  riskLabel,
+          log.info('AIWorker', 'Saved analysis to DB', { reportId, riskScore, riskLabel });
+
+          if (report.user_id) {
+            await dispatchNotification({
+              userId: String(report.user_id),
+              title: 'Report Analysis Completed',
+              body: 'Your medical report analysis is now ready.',
+              type: 'report',
+              metadata: { reportId: String(reportId), risk_score: riskScore, risk_label: riskLabel },
+              emailOpts: emailTemplates.reportReady(),
             });
 
-            if (riskScore >= 75 && user.email) {
-              await sendEmail(
-                user.email,
-                '⚠️ BioPulse — Urgent Health Alert',
-                `<h2>⚠️ High Risk Detected</h2>
-                 <p>Your latest health report has been flagged as <strong>${riskLabel} risk</strong> (score: ${riskScore}/100).</p>
-                 <p>Please consult your doctor as soon as possible.</p>`
-              );
+            if (riskScore >= 75) {
+              const user = await User.findById(report.user_id).lean();
+              if (user?.email) {
+                await dispatchNotification({
+                  userId: String(report.user_id),
+                  title: '⚠️ Urgent Health Alert',
+                  body: `Your latest health report has been flagged as ${riskLabel} risk (score: ${riskScore}/100). Please consult your doctor as soon as possible.`,
+                  type: 'system',
+                  emailOpts: {
+                    subject: '⚠️ BioPulse — Urgent Health Alert',
+                    html: `<h2>⚠️ High Risk Detected</h2>
+                           <p>Your latest health report has been flagged as <strong>${riskLabel} risk</strong> (score: ${riskScore}/100).</p>
+                           <p>Please consult your doctor as soon as possible.</p>`,
+                  },
+                });
+                log.warn('AIWorker', 'High-risk notification sent', { userId: String(report.user_id), riskScore });
+              }
             }
           }
 
-          console.log(`✅ [AIWorker] Done — risk=${riskScore}(${riskLabel}) | report=${reportId}`);
+          log.info('AIWorker', 'Complete', { reportId, riskScore, riskLabel });
+
         } catch (err) {
-          console.error(`❌ [AIWorker] Failed:`, err.message);
+          log.error('AIWorker', 'Analysis failed', { reportId, err: err.message, stack: err.stack });
 
           await HealthReport.findByIdAndUpdate(reportId, {
             analysis_status: 'failed',
             error_message:   err.message,
           });
 
-          throw err; // Let BullMQ retry
+          throw err; 
         }
       },
       { connection: redisConnection, concurrency: 2 }
     )
   );
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 📦 LOW STOCK CHECK WORKER
-  // ═══════════════════════════════════════════════════════════════════════════
   workers.push(
     new Worker(
       QUEUES.STOCK,
       async (job) => {
-        console.log('📦 [StockWorker] Running low-stock check...');
-
-        // Fetch only medicines with quantity field set and ≤ threshold
-        // Scoped per user — process in batches to avoid memory issues
+        log.info('StockWorker', 'Running low-stock check');
         const LOW_STOCK_THRESHOLD = job.data?.threshold ?? 5;
-        const BATCH_SIZE          = 100;
-        let   processed           = 0;
-        let   skip                = 0;
+        const BATCH_SIZE = 100;
+        let processed = 0, skip = 0;
 
         while (true) {
           const medicines = await Medicine.find({
             is_active: true,
             quantity:  { $exists: true, $lte: LOW_STOCK_THRESHOLD },
-          })
-            .skip(skip)
-            .limit(BATCH_SIZE)
-            .lean();
+          }).skip(skip).limit(BATCH_SIZE).lean();
 
-          if (medicines.length === 0) break;
+          if (!medicines.length) break;
 
-          // Group by userId to send one notification per user (not one per medicine)
           const byUser = new Map();
           for (const med of medicines) {
             const uid = med.user_id.toString();
@@ -543,67 +471,96 @@ export const startWorkers = () => {
           for (const [userId, meds] of byUser.entries()) {
             const user = await User.findById(userId).lean();
             if (!user) continue;
-
             for (const med of meds) {
               const remaining = med.quantity;
-              const msg       = `⚠️ ${med.name} is running low (${remaining} dose${remaining !== 1 ? 's' : ''} left)`;
-
-              if (user.fcm_token) {
-                await sendPushNotification(user.fcm_token, 'Low Stock Alert', msg, {
-                  type:       'low_stock',
-                  medicineId: med._id.toString(),
-                });
-              }
-
-              if (user.email) {
-                const tpl = emailTemplates.lowStockAlert(med.name, remaining);
-                await sendEmail(user.email, tpl.subject, tpl.html);
-              }
-
-              await emitSocket(userId, { type: 'low_stock', message: msg });
+              const msg = `⚠️ ${med.name} is running low (${remaining} dose${remaining !== 1 ? 's' : ''} left)`;
+              
+              await dispatchNotification({
+                userId: String(userId),
+                title: 'Low Stock Alert',
+                body: msg,
+                type: 'low_stock',
+                metadata: { medicineId: String(med._id) },
+                emailOpts: user.email ? emailTemplates.lowStockAlert(med.name, remaining) : null,
+              });
             }
           }
 
           processed += medicines.length;
-          skip      += BATCH_SIZE;
-
+          skip += BATCH_SIZE;
           if (medicines.length < BATCH_SIZE) break;
         }
 
-        console.log(`✅ [StockWorker] Checked ${processed} low-stock medicine(s)`);
+        log.info('StockWorker', 'Done', { processed });
       },
       { connection: redisConnection, concurrency: 1 }
     )
   );
 
-  // ─── Attach shared event listeners ────────────────────────────────────────
+  workers.push(
+    new Worker(
+      QUEUES.DIET,
+      async (job) => {
+        const { mealName } = job.data;
+        log.info('DietWorker', 'Processing meal reminders', { jobId: job.id, mealName });
+
+        const BATCH_SIZE = 100;
+        let processed = 0, skip = 0;
+
+        while (true) {
+          const users = await User.find({ is_banned: false })
+            .select('_id email fcm_token')
+            .skip(skip)
+            .limit(BATCH_SIZE)
+            .lean();
+
+          if (!users.length) break;
+
+          for (const user of users) {
+            const msg = `It's time for your scheduled meal: ${mealName}. Stay healthy!`;
+            
+            await dispatchNotification({
+              userId: String(user._id),
+              title: 'Meal Reminder',
+              body: msg,
+              type: 'diet',
+              metadata: { mealName },
+              emailOpts: user.email ? emailTemplates.dietReminder(mealName) : null,
+            });
+          }
+
+          processed += users.length;
+          skip += BATCH_SIZE;
+          if (users.length < BATCH_SIZE) break;
+        }
+
+        log.info('DietWorker', 'Done', { processed, mealName });
+      },
+      { connection: redisConnection, concurrency: 1 }
+    )
+  );
+
   for (const worker of workers) {
-    worker.on('failed', (job, err) => {
-      console.error(`❌ [Worker:${worker.name}] job=${job?.id} failed:`, err.message);
-    });
-    worker.on('error', (err) => {
-      console.error(`❌ [Worker:${worker.name}] error:`, err.message);
-    });
-    worker.on('active', (job) => {
-      console.log(`⏳ [Worker:${worker.name}] job=${job?.id} started`);
-    });
-    worker.on('completed', (job) => {
-      console.log(`✅ [Worker:${worker.name}] job=${job?.id} completed successfully`);
-    });
+    worker.on('failed',    (job, err) => log.error(`Worker:${worker.name}`, 'Job failed',    { jobId: job?.id, err: err.message }));
+    worker.on('error',     (err)      => log.error(`Worker:${worker.name}`, 'Worker error',  { err: err.message }));
+    worker.on('active',    (job)      => log.info( `Worker:${worker.name}`, 'Job active',    { jobId: job?.id }));
+    worker.on('completed', (job)      => log.info( `Worker:${worker.name}`, 'Job completed', { jobId: job?.id }));
   }
 
   return workers;
 };
 
-// ─── Helper: count non-null leaf values in nested object ─────────────────────
-
-function countNonNull(obj, depth = 0) {
-  if (depth > 5) return 0; // guard against deep nesting
-  let count = 0;
-  for (const val of Object.values(obj)) {
-    if (val !== null && val !== undefined) {
-      count += typeof val === 'object' ? countNonNull(val, depth + 1) : 1;
+async function _triggerAIAnalysis(reportId) {
+  const jobId = `analysis-${reportId}-${Date.now()}`;
+  await aiAnalysisQueue.add(
+    'analyze-report',
+    { reportId: String(reportId) },
+    {
+      jobId,
+      attempts:         5,
+      backoff:          { type: 'exponential', delay: 3000 },
+      removeOnComplete: true,
     }
-  }
-  return count;
+  );
+  log.info('_triggerAIAnalysis', 'AI job queued', { reportId, jobId });
 }
