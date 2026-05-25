@@ -9,7 +9,7 @@ const appointmentSchema = new mongoose.Schema(
     },
     doctor_id: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Doctor',
+      ref: 'User',
       required: true,
     },
     scheduled_at: {
@@ -29,6 +29,14 @@ const appointmentSchema = new mongoose.Schema(
       enum: ['scheduled', 'confirmed', 'rescheduled', 'completed', 'cancelled', 'no_show'],
       default: 'scheduled',
     },
+    token_number: {
+      type: Number,
+    },
+    queue_status: {
+      type: String,
+      enum: ['waiting', 'in_consultation', 'completed', 'no_show'],
+      default: 'waiting',
+    },
     auto_booked: {
       type: Boolean,
       default: false,
@@ -43,32 +51,4 @@ const appointmentSchema = new mongoose.Schema(
   }
 );
 
-const doctorSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-    },
-    specialisation: {
-      type: String,
-    },
-    hospital: {
-      type: String,
-    },
-    available_slots: {
-      type: [Date],
-      default: [],
-    },
-    phone: {
-      type: String,
-    },
-    email: {
-      type: String,
-    },
-  },
-  {
-    timestamps: true,
-  }
-);
-
 export const Appointment = mongoose.model('Appointment', appointmentSchema);
-export const Doctor = mongoose.model('Doctor', doctorSchema);
