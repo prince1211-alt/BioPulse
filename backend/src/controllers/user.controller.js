@@ -33,3 +33,8 @@ export const deleteAccount = asyncHandler(async (req, res) => {
   res.clearCookie('refreshToken');
   return success(res, { deleted: true }, 'Account deleted');
 });
+
+export const getPatientHistory = asyncHandler(async (req, res) => {
+  const history = await userService.getPatientHistory(req.params.userId);
+  return success(res, history);
+});
