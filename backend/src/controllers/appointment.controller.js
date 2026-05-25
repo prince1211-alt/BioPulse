@@ -7,19 +7,19 @@ export const getDoctors = asyncHandler(async (req, res) => {
   return success(res, doctors);
 });
 
-export const getDoctorSlots = asyncHandler(async (req, res) => {
-  const slots = await appointmentService.getDoctorSlots(req.params.id);
-  return success(res, slots);
+export const getDoctorSchedules = asyncHandler(async (req, res) => {
+  const schedules = await appointmentService.getDoctorSchedules(req.params.id);
+  return success(res, schedules);
 });
 
-export const addSlots = asyncHandler(async (req, res) => {
-  const slots = await appointmentService.addDoctorSlots(req.userId, req.body.slots);
-  return success(res, slots, `${req.body.slots.length} slot(s) added`);
+export const addSchedule = asyncHandler(async (req, res) => {
+  const schedule = await appointmentService.addDoctorSchedule(req.userId, req.body);
+  return success(res, schedule, `Schedule created with ${schedule.slots.length} slots`);
 });
 
-export const removeSlot = asyncHandler(async (req, res) => {
-  const result = await appointmentService.removeDoctorSlot(req.userId, req.body.slot);
-  return success(res, result);
+export const removeSchedule = asyncHandler(async (req, res) => {
+  const result = await appointmentService.removeDoctorSchedule(req.userId, req.body.id);
+  return success(res, result, 'Schedule removed successfully');
 });
 
 export const getAppointments = asyncHandler(async (req, res) => {
@@ -50,4 +50,14 @@ export const cancelAppointment = asyncHandler(async (req, res) => {
 export const updateAppointmentStatus = asyncHandler(async (req, res) => {
   const appointment = await appointmentService.updateAppointmentStatus(req.userId, req.params.id, req.body.status);
   return success(res, appointment);
+});
+
+export const updateQueueStatus = asyncHandler(async (req, res) => {
+  const appointment = await appointmentService.updateQueueStatus(req.userId, req.params.id, req.body.queue_status);
+  return success(res, appointment, 'Queue status updated');
+});
+
+export const getDoctorQueue = asyncHandler(async (req, res) => {
+  const result = await appointmentService.getDoctorQueueStatus(req.params.id);
+  return success(res, result);
 });
