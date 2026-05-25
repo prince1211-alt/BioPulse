@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-// Accept both full ISO datetimes and plain date strings (YYYY-MM-DD)
 const dateOrDatetime = z.string().refine(
   (v) => /^\d{4}-\d{2}-\d{2}(T.*)?$/.test(v),
   { message: 'Expected date (YYYY-MM-DD) or ISO datetime' }
@@ -8,7 +7,7 @@ const dateOrDatetime = z.string().refine(
 
 export const createMedicineSchema = z.object({
   name:             z.string().min(1, 'Name is required'),
-  // dosage can come as a number OR a string like "500mg" — accept both
+  
   dosage:           z.union([z.number().positive(), z.string().min(1)]),
   unit:             z.string().optional(),
   frequency:        z.enum(['daily', 'weekly', 'custom']).optional(),
