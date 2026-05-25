@@ -14,16 +14,16 @@ const medicineSchema = new mongoose.Schema(
     },
 
     dosage: {
-      type: String,   // e.g. '500mg' or '10'
+      type: String,   
       required: true,
     },
 
     unit: {
-      type: String,   // optional separate unit field
+      type: String,   
     },
 
     frequency: {
-      type: String,   // optional: 'daily', 'weekly', 'custom'
+      type: String,   
     },
 
     times: {
