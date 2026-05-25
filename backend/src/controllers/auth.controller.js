@@ -8,7 +8,7 @@ const setTokenCookie = (res, token) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000, 
   });
 };
 
@@ -56,12 +56,16 @@ export const verifyAuth = asyncHandler(async (req, res) => {
 
 export const banUser = asyncHandler(async (req, res) => {
   const { userId } = req.params;
-  const { ban } = req.body; // true = ban, false = unban
+  const { ban } = req.body; 
   const user = await authService.banUnbanUser(userId, ban);
   return success(res, user, `User ${ban ? 'banned' : 'unbanned'} successfully`);
 });
 
-// Used by JWT middleware to validate stored refresh token hash
+export const updateFcmToken = asyncHandler(async (req, res) => {
+  const result = await authService.updateFcmToken(req.userId, req.body.fcm_token);
+  return success(res, result, 'FCM token updated successfully');
+});
+
 export const validateRefreshToken = async (userId, token) => {
   try {
     const bcrypt = await import('bcrypt');
