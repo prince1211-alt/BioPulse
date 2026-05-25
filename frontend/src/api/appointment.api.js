@@ -10,6 +10,9 @@ export const appointmentApi = {
   // GET /appointments/doctors/:id/schedules
   getDoctorSchedules: (doctorId) => api.get(`/appointments/doctors/${doctorId}/schedules`),
 
+  // GET /appointments/doctors/:id/queue
+  getDoctorQueue: (doctorId) => api.get(`/appointments/doctors/${doctorId}/queue`),
+
   // POST /appointments/doctors/schedules  (doctor only)
   addSchedule: (data) => api.post('/appointments/doctors/schedules', data),
 
@@ -36,6 +39,10 @@ export const appointmentApi = {
   // PATCH /appointments/:id/status  (doctor only)
   // body: { status: 'completed' | 'no_show' }
   updateStatus: (id, status) => api.patch(`/appointments/${id}/status`, { status }),
+
+  // PATCH /appointments/:id/queue-status  (doctor only)
+  // body: { queue_status }
+  updateQueueStatus: (id, queue_status) => api.patch(`/appointments/${id}/queue-status`, { queue_status }),
 
   // POST /appointments/auto-book
   // body: { doctor_id, window_days?, trigger_medicine_id? }

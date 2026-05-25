@@ -1,7 +1,8 @@
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { Activity, Pill, CalendarCheck, FileText, Salad, LogOut, User, Loader2 } from 'lucide-react';
+import { Activity, Pill, CalendarCheck, FileText, Salad, LogOut, User, Loader2, ClipboardList } from 'lucide-react';
+import { SmartChatbot } from './components/SmartChatbot';
 
 import { useAuthStore } from './stores/authStore';
 import { useNotificationStore } from './stores/notificationStore';
@@ -19,6 +20,7 @@ const LoginPage = lazy(() => import('./pages/Login').then(m => ({ default: m.Log
 const SignupPage = lazy(() => import('./pages/Signup').then(m => ({ default: m.SignupPage })));
 const Home = lazy(() => import('./pages/Home').then(m => ({ default: m.Home })));
 const ProfilePage = lazy(() => import('./pages/Profile').then(m => ({ default: m.ProfilePage })));
+const PrescriptionsPage = lazy(() => import('./pages/Prescriptions').then(m => ({ default: m.PrescriptionsPage })));
 
 const SuspenseFallback = () => (
   <div className="flex items-center justify-center min-h-[50vh]">
@@ -26,11 +28,12 @@ const SuspenseFallback = () => (
   </div>
 );
 
-// ─── Nav items ────────────────────────────────────────────────────────────────
+// ── Nav items ────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
   { path: '/dashboard',    label: 'Dashboard',     icon: Activity,      allowedRoles: ['patient', 'doctor', 'admin'] },
   { path: '/medicines',    label: 'Medicines',     icon: Pill,          allowedRoles: ['patient'] },
+  { path: '/prescriptions',label: 'Prescriptions', icon: ClipboardList, allowedRoles: ['patient'] },
   { path: '/appointments', label: 'Appointments',  icon: CalendarCheck, allowedRoles: ['patient', 'doctor', 'admin'] },
   { path: '/reports',      label: 'Reports',       icon: FileText,      allowedRoles: ['patient'] },
   { path: '/diet',         label: 'Diet',          icon: Salad,         allowedRoles: ['patient'] },
@@ -150,6 +153,9 @@ const Layout = ({ children }) => {
             {children}
           </Suspense>
         </main>
+
+        {/* Global Floating AI Health Chatbot */}
+        <SmartChatbot />
       </div>
 
       {/* ── Mobile bottom nav ─────────────────────────────────────────────── */}
@@ -241,6 +247,7 @@ function App() {
           <Route path="/dashboard" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
           <Route path="/medicines" element={<ProtectedRoute><Layout><MedicinesPage /></Layout></ProtectedRoute>} />
           <Route path="/appointments" element={<ProtectedRoute><Layout><AppointmentsPage /></Layout></ProtectedRoute>} />
+          <Route path="/prescriptions" element={<ProtectedRoute><Layout><PrescriptionsPage /></Layout></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Layout><ReportsPage /></Layout></ProtectedRoute>} />
           <Route path="/diet" element={<ProtectedRoute><Layout><DietPage /></Layout></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><Layout><ProfilePage /></Layout></ProtectedRoute>} />

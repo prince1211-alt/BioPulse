@@ -3,9 +3,10 @@ import { format, isToday, isYesterday } from 'date-fns';
 import {
   Activity, Pill, CalendarCheck, FileText,
   TrendingUp, Bell, AlertTriangle, CheckCircle,
-  Clock, ArrowRight, Stethoscope,
+  Clock, ArrowRight, Stethoscope, Sparkles, Users, Loader2, Play, CheckCircle2, UserX
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 
 import { useAuthStore }        from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
@@ -205,7 +206,6 @@ export function Dashboard() {
     enabled:  !isDoctor,
   });
 
-  // ── Derived data ─────────────────────────────────────────────────────────────
   // Safe extraction with default empty arrays to prevent crashes on bad API responses
   const extractArray = (res, fallbackField) => {
     if (!res) return [];
@@ -224,6 +224,31 @@ export function Dashboard() {
     ['scheduled', 'rescheduled'].includes(a?.status)
   );
 
+  const todayAptForPatient = !isDoctor && upcomingApts.find(
+    (a) => format(new Date(a.scheduled_at), 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+  );
+
+  const targetDoctorId = isDoctor
+    ? user?._id
+    : (todayAptForPatient?.doctor_id?._id || todayAptForPatient?.doctor_id);
+
+  const { data: queueRes, refetch: refetchQueue } = useQuery({
+    queryKey: ['doctorQueue', targetDoctorId],
+    queryFn:  () => appointmentApi.getDoctorQueue(targetDoctorId).then((r) => r.data?.data || r.data),
+    enabled:  !!targetDoctorId,
+    refetchInterval: 30000, // auto-refresh every 30s
+  });
+
+  const queueStatusMutation = useMutation({
+    mutationFn: ({ id, queue_status }) => appointmentApi.updateQueueStatus(id, queue_status),
+    onSuccess: () => {
+      refetchQueue();
+      toast.success('Queue updated');
+    },
+    onError: () => toast.error('Failed to update queue status'),
+  });
+
+  // ── Derived data ─────────────────────────────────────────────────────────────
   const takenCount    = schedule.filter((i) => i.status === 'taken').length;
   const totalCount    = schedule.length;
 
@@ -316,6 +341,173 @@ export function Dashboard() {
           />
         )}
       </div>
+
+      {/* Doctor Live Queue Panel */}
+      {isDoctor && (
+        <Card className="border-indigo-200 bg-gradient-to-r from-indigo-50/50 to-primary/5 overflow-hidden">
+          <CardHeader className="border-b border-indigo-100 pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center">
+                  <Users className="h-4 w-4 text-indigo-600" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Live Queue — Today</CardTitle>
+                  <CardDescription>Manage your patient consultation queue in real-time</CardDescription>
+                </div>
+              </div>
+              <button
+                onClick={() => refetchQueue()}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+              >
+                <Loader2 className="h-3 w-3" /> Refresh
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {!queueRes ? (
+              <div className="flex gap-6 flex-wrap">
+                <Skeleton className="h-16 w-32" /><Skeleton className="h-16 w-32" /><Skeleton className="h-16 flex-1" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Queue stats */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-white border rounded-xl p-3 text-center shadow-sm">
+                    <p className="text-3xl font-black text-indigo-700">{queueRes.active_token ?? 0}</p>
+                    <p className="text-xs text-muted-foreground font-semibold mt-0.5">Active Token</p>
+                  </div>
+                  <div className="bg-white border rounded-xl p-3 text-center shadow-sm">
+                    <p className="text-3xl font-black text-amber-600">{queueRes.total_waiting ?? 0}</p>
+                    <p className="text-xs text-muted-foreground font-semibold mt-0.5">Waiting</p>
+                  </div>
+                  <div className="bg-white border rounded-xl p-3 text-center shadow-sm">
+                    <p className="text-3xl font-black text-emerald-600">
+                      {queueRes.appointments?.filter(a => a.queue_status === 'completed').length ?? 0}
+                    </p>
+                    <p className="text-xs text-muted-foreground font-semibold mt-0.5">Done Today</p>
+                  </div>
+                </div>
+
+                {/* Patient queue list */}
+                {queueRes.appointments?.length > 0 ? (
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                    {queueRes.appointments.map((a) => (
+                      <div
+                        key={a._id}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border text-xs transition-all ${
+                          a.queue_status === 'in_consultation'
+                            ? 'bg-primary/10 border-primary/30 shadow-sm'
+                            : a.queue_status === 'completed'
+                            ? 'bg-emerald-50 border-emerald-100 opacity-70'
+                            : 'bg-white border-border'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className={`h-6 w-6 rounded-full flex items-center justify-center font-black text-[10px] border ${
+                            a.queue_status === 'in_consultation' ? 'bg-primary text-primary-foreground border-primary' :
+                            a.queue_status === 'completed' ? 'bg-emerald-500 text-white border-emerald-500' :
+                            'bg-muted text-muted-foreground border-border'
+                          }`}>
+                            {a.token_number}
+                          </span>
+                          <div>
+                            <p className="font-bold text-slate-800">{a.user_name}</p>
+                            <p className="text-[10px] text-muted-foreground capitalize">{a.queue_status?.replace('_', ' ')}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-1.5">
+                          {a.queue_status === 'waiting' && (
+                            <button
+                              onClick={() => queueStatusMutation.mutate({ id: a._id, queue_status: 'in_consultation' })}
+                              disabled={queueStatusMutation.isPending}
+                              className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                            >
+                              <Play className="h-2.5 w-2.5" /> Call In
+                            </button>
+                          )}
+                          {a.queue_status === 'in_consultation' && (
+                            <button
+                              onClick={() => queueStatusMutation.mutate({ id: a._id, queue_status: 'completed' })}
+                              disabled={queueStatusMutation.isPending}
+                              className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                            >
+                              <CheckCircle2 className="h-2.5 w-2.5" /> Done
+                            </button>
+                          )}
+                          {a.queue_status === 'waiting' && (
+                            <button
+                              onClick={() => queueStatusMutation.mutate({ id: a._id, queue_status: 'no_show' })}
+                              disabled={queueStatusMutation.isPending}
+                              className="text-[10px] font-bold px-2 py-1 rounded-lg bg-muted text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
+                            >
+                              <UserX className="h-2.5 w-2.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-5 text-muted-foreground text-xs">
+                    No patients scheduled for today's queue.
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Patient Live Queue Panel */}
+      {!isDoctor && todayAptForPatient && queueRes && (
+        <Card className="border-emerald-200 bg-gradient-to-r from-emerald-50/50 to-primary/5 overflow-hidden shadow-sm">
+          <CardContent className="p-5 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 animate-pulse">
+                <Clock className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-800 text-base">Live Clinic Queue Tracker</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Your appointment with <span className="font-bold text-foreground">Dr. {todayAptForPatient.doctor_id?.name || 'your doctor'}</span> today
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 sm:gap-8 flex-wrap">
+              <div className="bg-card border rounded-xl p-3 px-5 text-center shadow-sm min-w-[100px]">
+                <p className="text-2xl font-black text-slate-800">{todayAptForPatient.token_number}</p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mt-0.5">Your Token</p>
+              </div>
+              <div className="bg-card border rounded-xl p-3 px-5 text-center shadow-sm min-w-[100px]">
+                <p className="text-2xl font-black text-emerald-600">{queueRes.active_token ?? 0}</p>
+                <p className="text-[10px] text-emerald-600/80 font-semibold uppercase tracking-wider mt-0.5">Serving Now</p>
+              </div>
+              <div className="bg-card border rounded-xl p-3 px-5 text-center shadow-sm min-w-[150px] flex flex-col justify-center">
+                <p className="text-sm font-bold text-slate-800">
+                  {queueRes.active_token === todayAptForPatient.token_number ? (
+                    <span className="text-emerald-600 font-extrabold flex items-center gap-1 animate-bounce">
+                      It's your turn! 🎉
+                    </span>
+                  ) : queueRes.active_token > todayAptForPatient.token_number ? (
+                    <span className="text-muted-foreground">Consultation completed</span>
+                  ) : (
+                    <span>
+                      {Math.max(0, todayAptForPatient.token_number - queueRes.active_token - 1)} patient(s) ahead
+                    </span>
+                  )}
+                </p>
+                <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider mt-0.5">
+                  {queueRes.active_token === todayAptForPatient.token_number ? "Proceed to doctor's room" : 
+                   queueRes.active_token > todayAptForPatient.token_number ? "Thank you!" :
+                   `Est. wait: ~${Math.max(0, (todayAptForPatient.token_number - queueRes.active_token) * 15)} mins`}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Main content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

@@ -9,4 +9,9 @@ crash.log
 /node_modules
 
 /prisma/migrations
+backend/eng.traineddata
 
+backend\scratch
+scratch
+\.env
+env

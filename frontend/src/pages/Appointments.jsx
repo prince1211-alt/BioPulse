@@ -4,10 +4,12 @@ import { format, isFuture, isToday } from 'date-fns';
 import {
   CalendarCheck, Clock, CheckCircle2, XCircle,
   Stethoscope, Search, UserCircle, RefreshCw,
-  Calendar, Trash2, Users, FileText
+  Calendar, Trash2, Users, FileText, X, Printer, ClipboardList, Eye
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { appointmentApi } from '../api/appointment.api';
+import { prescriptionApi } from '../api/prescription.api';
+import { userApi } from '../api/user.api';
 import { useAuthStore } from '../stores/authStore';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -201,6 +203,8 @@ export function AppointmentsPage() {
   const [searchQuery,     setSearchQuery]     = useState('');
   const [reschedulingApt, setReschedulingApt] = useState(null);
   const [bookingDoctor,   setBookingDoctor]   = useState(null);
+  const [prescribingApt,  setPrescribingApt]  = useState(null);
+  const [selectedHistoryPatientId, setSelectedHistoryPatientId] = useState(null);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
   const { data: doctorsRes, isLoading: isLoadingDoctors, isError: isDoctorsError } = useQuery({
@@ -311,6 +315,20 @@ export function AppointmentsPage() {
         />
       )}
 
+      {prescribingApt && (
+        <WritePrescriptionModal
+          appointment={prescribingApt}
+          onClose={() => setPrescribingApt(null)}
+        />
+      )}
+
+      {selectedHistoryPatientId && (
+        <PatientHistoryModal
+          patientId={selectedHistoryPatientId}
+          onClose={() => setSelectedHistoryPatientId(null)}
+        />
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* ── My appointments ──────────────────────────────────────────────── */}
         <div className="lg:col-span-5 space-y-6">
@@ -364,12 +382,23 @@ export function AppointmentsPage() {
                               <Stethoscope className="h-3 w-3" />
                               {isDoctor ? (patient?.email || '') : (doc?.specialisation || '')}
                             </p>
+                            {isDoctor && patient?._id && (
+                              <button
+                                onClick={() => setSelectedHistoryPatientId(patient._id)}
+                                className="text-[10px] text-primary font-bold hover:underline block mt-1 text-left"
+                              >
+                                View Medical History
+                              </button>
+                            )}
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-background border rounded-md px-2 py-1 w-fit mb-3">
                           <Clock className="h-3 w-3" />
                           {format(new Date(apt.scheduled_at), 'MMM dd, yyyy · hh:mm a')}
+                          {apt.token_number && (
+                            <span className="ml-1.5 border-l pl-1.5 text-indigo-700">Token #{apt.token_number}</span>
+                          )}
                         </div>
 
                         <div className="flex gap-2 justify-end border-t border-primary/10 pt-3">
@@ -388,6 +417,10 @@ export function AppointmentsPage() {
                           )}
                           {isDoctor && (
                             <>
+                              <Button
+                                variant="outline" size="sm" className="h-7 text-xs bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
+                                onClick={() => setPrescribingApt(apt)}
+                              ><FileText className="h-3 w-3 mr-1" /> Prescribe</Button>
                               <Button
                                 variant="outline" size="sm" className="h-7 text-xs"
                                 onClick={() => statusMutation.mutate({ id: apt._id, status: 'completed' })}
@@ -683,6 +716,472 @@ function DoctorSlotManager() {
               </Card>
             )
           })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Write Prescription Modal ───────────────────────────────────────────
+function WritePrescriptionModal({ appointment, onClose }) {
+  const queryClient = useQueryClient();
+  const [diagnosis, setDiagnosis] = useState('');
+  const [symptomsInput, setSymptomsInput] = useState('');
+  const [advice, setAdvice] = useState('');
+  const [isTemplate, setIsTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [medicines, setMedicines] = useState([
+    { name: '', dosage: '', frequency: '1-0-1', duration: '5 days', instructions: 'after food' }
+  ]);
+
+  // Load templates
+  const { data: templatesRes } = useQuery({
+    queryKey: ['doctorTemplates'],
+    queryFn: () => prescriptionApi.getTemplates().then(res => res.data?.data || res.data || []),
+  });
+  const templates = Array.isArray(templatesRes) ? templatesRes : [];
+
+  const createPrescriptionMutation = useMutation({
+    mutationFn: (data) => prescriptionApi.create(data),
+    onSuccess: () => {
+      toast.success('Prescription created & sent successfully!');
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      onClose();
+    },
+    onError: (err) => toast.error(err.message || 'Failed to create prescription'),
+  });
+
+  const handleAddMedicine = () => {
+    setMedicines(prev => [...prev, { name: '', dosage: '', frequency: '1-0-1', duration: '5 days', instructions: 'after food' }]);
+  };
+
+  const handleRemoveMedicine = (index) => {
+    if (medicines.length === 1) return;
+    setMedicines(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleMedChange = (index, field, val) => {
+    setMedicines(prev => prev.map((m, i) => i === index ? { ...m, [field]: val } : m));
+  };
+
+  const handleLoadTemplate = (templateId) => {
+    if (!templateId) return;
+    const selected = templates.find(t => t._id === templateId);
+    if (selected) {
+      setDiagnosis(selected.diagnosis || '');
+      setSymptomsInput(selected.symptoms?.join(', ') || '');
+      setAdvice(selected.advice || '');
+      setMedicines(selected.medicines?.map(m => ({
+        name: m.name,
+        dosage: m.dosage,
+        frequency: m.frequency,
+        duration: m.duration,
+        instructions: m.instructions || ''
+      })) || []);
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!diagnosis.trim()) {
+      toast.error('Diagnosis is required');
+      return;
+    }
+    const emptyMed = medicines.some(m => !m.name.trim() || !m.dosage.trim() || !m.frequency.trim());
+    if (emptyMed) {
+      toast.error('Please fill in all medicine names, dosages, and frequencies');
+      return;
+    }
+
+    const payload = {
+      patient_id: appointment.user_id?._id || appointment.user_id,
+      appointment_id: appointment._id,
+      diagnosis: diagnosis.trim(),
+      symptoms: symptomsInput.split(',').map(s => s.trim()).filter(Boolean),
+      medicines,
+      advice: advice.trim(),
+      is_template: isTemplate,
+      template_name: isTemplate ? templateName.trim() : undefined,
+    };
+
+    createPrescriptionMutation.mutate(payload);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="bg-background rounded-2xl shadow-2xl w-full max-w-lg border overflow-hidden flex flex-col my-8 max-h-[90vh]">
+        <div className="p-4 border-b bg-muted/40 flex justify-between items-center shrink-0">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <ClipboardList className="h-4.5 w-4.5 text-primary" /> Write Prescription
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-muted rounded-full">
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
+          {/* Template Loader */}
+          {templates.length > 0 && (
+            <div className="space-y-1 bg-primary/5 p-3 rounded-lg border border-primary/20">
+              <Label className="text-primary font-bold text-[10px]">Quick Templates</Label>
+              <select
+                className="w-full mt-1 p-2 rounded-md border bg-background text-[11px]"
+                onChange={(e) => handleLoadTemplate(e.target.value)}
+                defaultValue=""
+              >
+                <option value="">-- Load a saved template --</option>
+                {templates.map(t => (
+                  <option key={t._id} value={t._id}>{t.template_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Diagnosis & Symptoms */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Diagnosis *</Label>
+              <Input
+                placeholder="e.g. Viral Fever"
+                required
+                value={diagnosis}
+                onChange={e => setDiagnosis(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Symptoms (comma separated)</Label>
+              <Input
+                placeholder="e.g. Fever, Cough, Chills"
+                value={symptomsInput}
+                onChange={e => setSymptomsInput(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Medicines List */}
+          <div className="space-y-2 border-t pt-3">
+            <div className="flex justify-between items-center">
+              <Label className="font-bold text-sm">Medicines (Rx)</Label>
+              <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={handleAddMedicine}>
+                + Add Item
+              </Button>
+            </div>
+            
+            <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+              {medicines.map((m, index) => (
+                <div key={index} className="p-2.5 border rounded-xl space-y-2 bg-muted/20 relative">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">Name *</Label>
+                      <Input
+                        placeholder="Paracetamol"
+                        value={m.name}
+                        required
+                        onChange={e => handleMedChange(index, 'name', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">Dosage *</Label>
+                      <Input
+                        placeholder="500mg / 1 tab"
+                        value={m.dosage}
+                        required
+                        onChange={e => handleMedChange(index, 'dosage', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">Frequency *</Label>
+                      <Input
+                        placeholder="1-0-1"
+                        value={m.frequency}
+                        required
+                        onChange={e => handleMedChange(index, 'frequency', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">Duration *</Label>
+                      <Input
+                        placeholder="5 days"
+                        value={m.duration}
+                        required
+                        onChange={e => handleMedChange(index, 'duration', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <Label className="text-[10px]">Instructions</Label>
+                      <Input
+                        placeholder="after food"
+                        value={m.instructions}
+                        onChange={e => handleMedChange(index, 'instructions', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {medicines.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveMedicine(index)}
+                      className="absolute top-1 right-2 text-destructive hover:text-red-700 font-bold"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Advice */}
+          <div className="space-y-1 border-t pt-3">
+            <Label>Advice & Lifestyle Instructions</Label>
+            <textarea
+              className="w-full h-16 rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="e.g. Drink plenty of water and rest..."
+              value={advice}
+              onChange={e => setAdvice(e.target.value)}
+            />
+          </div>
+
+          {/* Save Template */}
+          <div className="space-y-2 border-t pt-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="is-template"
+                checked={isTemplate}
+                onChange={e => setIsTemplate(e.target.checked)}
+                className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5"
+              />
+              <label htmlFor="is-template" className="font-bold">Save as a quick template for future use</label>
+            </div>
+            {isTemplate && (
+              <div className="space-y-1">
+                <Label>Template Name *</Label>
+                <Input
+                  placeholder="e.g. Standard Viral Fever"
+                  required
+                  value={templateName}
+                  onChange={e => setTemplateName(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 pt-3 border-t">
+            <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
+            <Button
+              type="submit"
+              className="flex-1"
+              disabled={createPrescriptionMutation.isPending}
+            >
+              {createPrescriptionMutation.isPending ? 'Submitting...' : 'Save & Complete'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Patient History Modal ──────────────────────────────────────────────
+function PatientHistoryModal({ patientId, onClose }) {
+  const { data: historyRes, isLoading } = useQuery({
+    queryKey: ['patientHistory', patientId],
+    queryFn: () => userApi.getPatientHistory(patientId).then(res => res.data?.data || res.data),
+    enabled: !!patientId,
+  });
+
+  const [activeTab, setActiveTab] = useState('profile');
+
+  const h = historyRes;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="bg-background rounded-2xl shadow-2xl w-full max-w-2xl border overflow-hidden flex flex-col my-8 max-h-[85vh]">
+        <div className="p-4 border-b bg-muted/40 flex justify-between items-center shrink-0">
+          <h3 className="font-bold text-base">Patient Medical Record</h3>
+          <button onClick={onClose} className="p-1 hover:bg-muted rounded-full">
+            <X size={18} />
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="p-10 space-y-4">
+            <Skeleton className="h-10 w-1/3" />
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : !h ? (
+          <div className="p-6 text-center text-muted-foreground">Failed to load patient history.</div>
+        ) : (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {/* Patient Header */}
+            <div className="p-4 bg-muted/20 border-b flex items-center gap-3 shrink-0">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center font-black text-primary text-lg">
+                {h.patient?.name?.charAt(0)?.toUpperCase()}
+              </div>
+              <div>
+                <h4 className="font-bold text-sm">{h.patient?.name}</h4>
+                <p className="text-[10px] text-muted-foreground">
+                  {h.patient?.email} · {h.patient?.age || '—'} yrs · {h.patient?.gender || '—'}
+                </p>
+              </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b text-[11px] font-semibold bg-muted/10 shrink-0">
+              {['profile', 'reports', 'prescriptions', 'medicines'].map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 py-2.5 text-center capitalize border-b-2 transition-all ${
+                    activeTab === tab 
+                      ? 'border-primary text-primary font-bold bg-background' 
+                      : 'border-transparent text-muted-foreground hover:bg-muted/30'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 overflow-y-auto p-4 text-[11px] space-y-4">
+              {activeTab === 'profile' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="p-2 border rounded-xl bg-card">
+                      <p className="text-muted-foreground font-semibold">Blood Group</p>
+                      <p className="text-xs font-bold text-foreground mt-0.5">{h.patient?.blood_group || '—'}</p>
+                    </div>
+                    <div className="p-2 border rounded-xl bg-card">
+                      <p className="text-muted-foreground font-semibold">Height</p>
+                      <p className="text-xs font-bold text-foreground mt-0.5">{h.patient?.height ? `${h.patient.height} cm` : '—'}</p>
+                    </div>
+                    <div className="p-2 border rounded-xl bg-card">
+                      <p className="text-muted-foreground font-semibold">Weight</p>
+                      <p className="text-xs font-bold text-foreground mt-0.5">{h.patient?.weight ? `${h.patient.weight} kg` : '—'}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="p-3 border rounded-xl bg-card space-y-1">
+                      <h5 className="font-bold text-slate-800">Chronic Conditions</h5>
+                      {h.patient?.chronic_conditions?.length > 0 || h.patient?.conditions?.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {(h.patient.chronic_conditions || h.patient.conditions || []).map((cond, i) => (
+                            <span key={i} className="bg-red-50 text-red-700 px-2 py-0.5 rounded-full border border-red-100 font-semibold">{cond}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground italic mt-0.5">No chronic conditions listed.</p>
+                      )}
+                    </div>
+
+                    <div className="p-3 border rounded-xl bg-card space-y-1">
+                      <h5 className="font-bold text-slate-800">Allergies</h5>
+                      {h.patient?.allergies?.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {h.patient.allergies.map((alg, i) => (
+                            <span key={i} className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-100 font-semibold">{alg}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground italic mt-0.5">No allergies listed.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'reports' && (
+                <div className="space-y-2">
+                  {h.reports?.length === 0 ? (
+                    <p className="text-center py-6 text-muted-foreground italic">No lab reports uploaded.</p>
+                  ) : (
+                    h.reports?.map(r => (
+                      <div key={r._id} className="p-3 border rounded-xl flex justify-between items-center bg-card">
+                        <div>
+                          <p className="font-bold text-xs capitalize">{r.report_type?.replace('_', ' ')}</p>
+                          <p className="text-[9px] text-muted-foreground mt-0.5">
+                            Uploaded: {format(new Date(r.report_date), 'MMM dd, yyyy')}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {r.risk_score != null && (
+                            <span className={`font-bold px-2 py-0.5 rounded-full border ${
+                              r.risk_score >= 75 ? 'bg-red-50 text-red-600 border-red-200' :
+                              r.risk_score >= 50 ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                              'bg-emerald-50 text-emerald-600 border-emerald-200'
+                            }`}>
+                              Risk {r.risk_score}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'prescriptions' && (
+                <div className="space-y-3">
+                  {h.prescriptions?.length === 0 ? (
+                    <p className="text-center py-6 text-muted-foreground italic">No past prescriptions.</p>
+                  ) : (
+                    h.prescriptions?.map(p => (
+                      <div key={p._id} className="p-3 border rounded-xl bg-card space-y-2">
+                        <div className="flex justify-between items-start border-b pb-1.5">
+                          <div>
+                            <p className="font-bold text-slate-800 text-xs">Diagnosis: {p.diagnosis}</p>
+                            <p className="text-[9px] text-muted-foreground mt-0.5">By Dr. {p.doctor_id?.name}</p>
+                          </div>
+                          <span className="text-[9px] text-slate-500 font-semibold">{format(new Date(p.createdAt), 'MMM dd, yyyy')}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="font-bold text-slate-700">Medicines:</p>
+                          <div className="divide-y border rounded-lg bg-muted/10 overflow-hidden text-[10px]">
+                            {p.medicines?.map((m, i) => (
+                              <div key={i} className="p-1.5 flex justify-between hover:bg-muted/20">
+                                <span className="font-semibold text-slate-800">{m.name} ({m.dosage})</span>
+                                <span className="text-muted-foreground">{m.frequency} · {m.duration}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'medicines' && (
+                <div className="space-y-2">
+                  {h.medicines?.length === 0 ? (
+                    <p className="text-center py-6 text-muted-foreground italic">No active medicines scheduled.</p>
+                  ) : (
+                    h.medicines?.map(m => (
+                      <div key={m._id} className="p-3 border rounded-xl flex justify-between items-center bg-card">
+                        <div>
+                          <p className="font-bold text-xs">{m.name} ({m.dosage})</p>
+                          <p className="text-[9px] text-muted-foreground mt-0.5">
+                            Schedule: {m.times?.join(', ')} · {m.frequency}
+                          </p>
+                        </div>
+                        <span className={`px-2.5 py-0.5 rounded-full border text-[9px] font-bold ${
+                          m.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-muted text-muted-foreground'
+                        }`}>
+                          {m.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

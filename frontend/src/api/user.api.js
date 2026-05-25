@@ -21,6 +21,9 @@ export const userApi = {
   // GET /users/:userId
   getUserById: (userId) => api.get(`/users/${userId}`),
 
+  // GET /users/:userId/history
+  getPatientHistory: (userId) => api.get(`/users/${userId}/history`),
+
   // PATCH /users/:userId/ban
   banUser: (userId, ban) => api.patch(`/users/${userId}/ban`, { ban }),
 };

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import {
@@ -65,6 +65,15 @@ function useReportPolling(reportId, enabled) {
     },
   });
 }
+
+// ── Safe array coercion — AI sometimes returns strings instead of arrays ────────
+const toArray = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  // e.g. a newline-separated string
+  if (typeof val === 'string') return val.split('\n').map((s) => s.trim()).filter(Boolean);
+  return [];
+};
 
 // ── Expandable report card ────────────────────────────────────────────────────
 function ReportCard({ report, onDelete, onReanalyze }) {
@@ -300,59 +309,7 @@ function ReportCard({ report, onDelete, onReanalyze }) {
             </button>
 
             {expanded && (
-              <div className="space-y-4 pt-2 border-t">
-                {insights.risks?.length > 0 && (
-                  <Section icon={<Shield className="h-3.5 w-3.5" />} title="Identified Risks">
-                    <ul className="space-y-1">
-                      {insights.risks.map((r, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <span className="text-red-400 mt-0.5">•</span> {r}
-                        </li>
-                      ))}
-                    </ul>
-                  </Section>
-                )}
-
-                {insights.diet_recommendations?.length > 0 && (
-                  <Section icon={<Utensils className="h-3.5 w-3.5" />} title="Diet Recommendations">
-                    <ul className="space-y-1">
-                      {insights.diet_recommendations.map((d, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <span className="text-emerald-400 mt-0.5">•</span> {d}
-                        </li>
-                      ))}
-                    </ul>
-                  </Section>
-                )}
-
-                {insights.exercise_recommendations?.plan?.length > 0 && (
-                  <Section icon={<Dumbbell className="h-3.5 w-3.5" />} title={`Exercise — ${insights.exercise_recommendations.weekly_minutes} min/week`}>
-                    <ul className="space-y-1">
-                      {insights.exercise_recommendations.plan.map((e, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <span className="text-blue-400 mt-0.5">•</span> {e}
-                        </li>
-                      ))}
-                    </ul>
-                  </Section>
-                )}
-
-                {insights.doctor_recommendations?.length > 0 && (
-                  <Section icon={<Stethoscope className="h-3.5 w-3.5" />} title="Doctor Recommendations">
-                    <ul className="space-y-1">
-                      {insights.doctor_recommendations.map((d, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <span className="text-primary/60 mt-0.5">•</span> {d}
-                        </li>
-                      ))}
-                    </ul>
-                  </Section>
-                )}
-
-                {insights.disclaimer && (
-                  <p className="text-[11px] text-muted-foreground border-t pt-3 italic">{insights.disclaimer}</p>
-                )}
-              </div>
+              <ExpandedInsights insights={insights} onReanalyze={() => onReanalyze(liveReport._id)} />
             )}
           </div>
         )}
@@ -377,6 +334,153 @@ function Section({ icon, title, children }) {
       {children}
     </div>
   );
+}
+
+// ── Expanded analytics panel with built-in error boundary ────────────────────
+// ── Expanded analytics panel with built-in error boundary ────────────────────
+class ExpandedInsights extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  renderRisk(r) {
+    if (!r) return '';
+    if (typeof r === 'string') return r;
+    const parts = [];
+    if (r.risk) parts.push(r.risk);
+    const meta = [];
+    if (r.probability) meta.push(`probability: ${r.probability}`);
+    if (r.timeframe) meta.push(`timeframe: ${r.timeframe}`);
+    if (meta.length > 0) parts.push(`(${meta.join(', ')})`);
+    if (r.basis) parts.push(`— basis: ${r.basis}`);
+    return parts.join(' ');
+  }
+
+  renderDiet(d) {
+    if (!d) return '';
+    if (typeof d === 'string') return d;
+    const parts = [];
+    if (d.advice) parts.push(d.advice);
+    if (d.basis) parts.push(`(basis: ${d.basis})`);
+    if (d.priority) parts.push(`[priority: ${d.priority}]`);
+    return parts.join(' ');
+  }
+
+  renderExercise(e) {
+    if (!e) return '';
+    if (typeof e === 'string') return e;
+    const parts = [];
+    if (e.activity) parts.push(e.activity);
+    if (e.duration_min) parts.push(`(${e.duration_min} min)`);
+    if (e.frequency) parts.push(`- ${e.frequency}`);
+    if (e.basis) parts.push(`(basis: ${e.basis})`);
+    return parts.join(' ');
+  }
+
+  renderDoctor(d) {
+    if (!d) return '';
+    if (typeof d === 'string') return d;
+    const parts = [];
+    if (d.specialist) parts.push(d.specialist);
+    if (d.urgency) parts.push(`[${d.urgency}]`);
+    if (d.reason) parts.push(`— ${d.reason}`);
+    if (d.specific_request) parts.push(`(request: ${d.specific_request})`);
+    return parts.join(' ');
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700">
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold mb-1">Could not render full analysis</p>
+            <p className="text-xs opacity-80">The AI returned data in an unexpected format. Try re-analyzing the report.</p>
+          </div>
+          {this.props.onReanalyze && (
+            <button onClick={this.props.onReanalyze} className="text-xs font-semibold underline shrink-0">
+              Re-analyze
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    const { insights } = this.props;
+    const risks        = toArray(insights.risks);
+    const diet         = toArray(insights.diet_recommendations);
+    const doctorRecs   = toArray(insights.doctor_recommendations);
+    const exPlan       = toArray(insights.exercise_recommendations?.plan);
+    const exMins       = insights.exercise_recommendations?.weekly_minutes;
+
+    return (
+      <div className="space-y-4 pt-2 border-t">
+        {risks.length > 0 && (
+          <Section icon={<Shield className="h-3.5 w-3.5" />} title="Identified Risks">
+            <ul className="space-y-1">
+              {risks.map((r, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-foreground/80">
+                  <span className="text-red-400 mt-0.5 shrink-0">•</span> 
+                  <span>{this.renderRisk(r)}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {diet.length > 0 && (
+          <Section icon={<Utensils className="h-3.5 w-3.5" />} title="Diet Recommendations">
+            <ul className="space-y-1">
+              {diet.map((d, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-foreground/80">
+                  <span className="text-emerald-400 mt-0.5 shrink-0">•</span> 
+                  <span>{this.renderDiet(d)}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {exPlan.length > 0 && (
+          <Section
+            icon={<Dumbbell className="h-3.5 w-3.5" />}
+            title={`Exercise${exMins != null ? ` — ${exMins} min/week` : ''}`}
+          >
+            <ul className="space-y-1">
+              {exPlan.map((e, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-foreground/80">
+                  <span className="text-blue-400 mt-0.5 shrink-0">•</span> 
+                  <span>{this.renderExercise(e)}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {doctorRecs.length > 0 && (
+          <Section icon={<Stethoscope className="h-3.5 w-3.5" />} title="Doctor Recommendations">
+            <ul className="space-y-1">
+              {doctorRecs.map((d, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-foreground/80">
+                  <span className="text-primary/60 mt-0.5 shrink-0">•</span> 
+                  <span>{this.renderDoctor(d)}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {insights.disclaimer && (
+          <p className="text-[11px] text-muted-foreground border-t pt-3 italic">{insights.disclaimer}</p>
+        )}
+      </div>
+    );
+  }
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
