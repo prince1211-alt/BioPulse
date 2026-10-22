@@ -26,24 +26,29 @@ Goal: understand every important part of the code well enough to explain it, tra
 | # | File | Part | What it covers |
 |---|---|---|---|
 | 00 | [00-README.md](00-README.md) | — | This index, legend, verification log, progress ledger |
-| 01 | [01-part1-overview.md](01-part1-overview.md) | I | What BioPulse is, users, features, feature status |
-| 02 | [02-part2-repository-structure.md](02-part2-repository-structure.md) | II | Folder tree, all 131 files, feature-to-file map, import graph, dead code |
-| 03 | [03-part3-tech-stack.md](03-part3-tech-stack.md) | III | Every technology: what, why, how, in this project, trade-offs, interview Q&A |
-| 04 | [04-part4a-backend-files.md](04-part4a-backend-files.md) | IV-A | Every backend file explained (config → routes → controllers → services → repositories → models → workers) |
-| 05 | [05-part4b-frontend-files.md](05-part4b-frontend-files.md) | IV-B | Every frontend file explained (entry, API layer, stores, hooks, components, pages) |
-| 06 | [06-part5-workflows.md](06-part5-workflows.md) | V | End-to-end feature traces with sequence diagrams and dry runs |
-| 07 | [07-part6-database.md](07-part6-database.md) | VI | MongoDB models, relationships, every query, indexes, transactions, races |
-| 08 | [08-part7-api.md](08-part7-api.md) | VII | All 63 HTTP endpoints, Socket.IO, Redis pub/sub, BullMQ jobs, external APIs |
-| 09 | [09-part8-security.md](09-part8-security.md) | VIII | Auth design + every confirmed vulnerability with attack, impact, fix, test |
-| 10 | [10-part9-cs-concepts.md](10-part9-cs-concepts.md) | IX | Event loop, async, closures, patterns, complexity, state machines, time zones |
-| 11 | [11-part10-system-design.md](11-part10-system-design.md) | X | Current architecture vs. scaled design; hard "what if" questions |
-| 12 | [12-part11-testing-debugging.md](12-part11-testing-debugging.md) | XI | Existing tests, coverage gaps, test tables, debugging playbooks, bug catalogue |
-| 13 | [13-part12-deployment.md](13-part12-deployment.md) | XII | Env vars, scripts, processes, what exists vs. recommended production setup |
-| 14 | [14-part13-question-bank.md](14-part13-question-bank.md) | XIII | 130+ project-specific interview questions with answers |
-| 15 | [15-part14-exercises.md](15-part14-exercises.md) | XIV | Practical exercises (solutions at the end) |
-| 16 | [16-part15-presentation.md](16-part15-presentation.md) | XV | 30s / 60s / 2 min / 5 min pitches, design decisions, limitations, roadmap |
-| 17 | [17-part16-revision.md](17-part16-revision.md) | XVI | One-page summary, cheat sheets, top 25 questions, flashcards, mock interview, study plan |
-| 18 | [18-coverage-audit.md](18-coverage-audit.md) | — | Completeness audit: every file, every feature, every endpoint |
+| 01 | [01-part1-overview.md](01-part1-overview.md) | I | What BioPulse is, users, requirements, honest feature status, architecture diagram |
+| 02 | [02-part2-repository-structure.md](02-part2-repository-structure.md) | II | Folder tree, all 131 files, feature-to-file map, import graphs, dependencies, dead code |
+| 03 | [03-part3-tech-stack.md](03-part3-tech-stack.md) | III-A | Backend & infrastructure technologies: what, why, how, in this project, trade-offs, Q&A |
+| 03b | [03b-part3-tech-stack-frontend.md](03b-part3-tech-stack-frontend.md) | III-B | Frontend technologies |
+| 04a | [04a-part4-backend-core-files.md](04a-part4-backend-core-files.md) | IV-A (1/2) | Backend core files: server, app, cron, config, middleware, utils, routes, controllers |
+| 04b | [04b-part4-backend-domain-files.md](04b-part4-backend-domain-files.md) | IV-A (2/2) | Services, repositories, models, schemas, queues, workers, AI module — with dry runs |
+| 05 | [05-part4b-frontend-files.md](05-part4b-frontend-files.md) | IV-B | Every frontend file |
+| 06 | [06-part5-workflows.md](06-part5-workflows.md) | V | End-to-end feature traces with sequence diagrams |
+| 07 | [07-part6-database.md](07-part6-database.md) | VI | Models, relationships, every query, indexes, transactions, races, migrations |
+| 08 | [08-part7-api.md](08-part7-api.md) | VII | All 63 endpoints, sockets, pub/sub, jobs, external APIs |
+| 09 | [09-part8-security.md](09-part8-security.md) | VIII | Auth design + SEC-01…19 with attack, impact, fix, test |
+| 10 | [10-part9-cs-concepts.md](10-part9-cs-concepts.md) | IX | Async, closures, races, idempotency, state machines, complexity, patterns, SOLID, time zones |
+| 11 | [11-part10-system-design.md](11-part10-system-design.md) | X | Current vs. scaled architecture; 13 hard "what if" questions |
+| 12 | [12-part11-testing-debugging.md](12-part11-testing-debugging.md) | XI | Tests, test tables, bug catalogue BUG-01…30, debugging playbooks, optimisations |
+| 13 | [13-part12-deployment.md](13-part12-deployment.md) | XII | Env vars, scripts, local setup, recommended production setup |
+| 14 | [14-part13-question-bank.md](14-part13-question-bank.md) | XIII (1/2) | Questions 1–75 |
+| 14b | [14b-part13-question-bank-2.md](14b-part13-question-bank-2.md) | XIII (2/2) | Questions 76–137 |
+| 15 | [15-part14-exercises.md](15-part14-exercises.md) | XIV | 20 exercises, solutions at the end |
+| 16 | [16-part15-presentation.md](16-part15-presentation.md) | XV | 30 s / 60 s / 2 min / 5 min pitches, decisions, limitations, roadmap, tough follow-ups |
+| 17 | [17-part16-revision.md](17-part16-revision.md) | XVI | One-page summary, cheat sheets, top 25 questions, 50 flashcards, mock interview, study plan |
+| 18 | [18-coverage-audit.md](18-coverage-audit.md) | — | Completeness audit: 131-file matrix + technology/feature/API/DB/security checklists + gaps |
+
+**Suggested reading order for a short deadline:** 01 → 17 (summary + top 25) → 09 → 06 → 16.
 
 **Sections deliberately not included** (because the project does not have them): GraphQL, SQL/relational schema migrations, CI/CD pipelines, Docker/Kubernetes files, end-to-end browser tests, TypeScript type system, SSR. Where their absence matters (e.g. no CI), it is discussed as a limitation.
 

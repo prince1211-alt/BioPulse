@@ -135,7 +135,7 @@ flowchart LR
   R -->|jobs| W
   W --> DB
   W -->|publish 'notifications'| R
-  R -.->|subscribe (never starts: BUG-01)| IO -.-> SIO
+  R -.->|"subscribe (never starts: BUG-01)"| IO -.-> SIO
   RT -->|multer upload| CL
   W -->|download file| CL
   W --> GQ

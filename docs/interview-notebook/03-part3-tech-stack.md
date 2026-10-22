@@ -91,7 +91,7 @@ Frontend technologies are in [03b-part3-tech-stack-frontend.md](03b-part3-tech-s
 - `.lean()` returns plain JS objects (faster, no getters/methods/`save`).
 - Transactions need a replica set or sharded cluster.
 
-**In BioPulse.** 8 models (Part VI). Notable features used: `timestamps: true` everywhere; embedded arrays (`Schedule.slots`, `DietPlan.meals`, `Prescription.medicines`); `Mixed` type for AI JSON; TTL index on `Notification.createdAt` (30 days); unique sparse `email`/`phone`; positional `$inc` (`'slots.$.booked'`); upsert for dose logs; sessions + transactions in `medicine.service.js`.
+**In BioPulse.** 9 models in 8 files (Part VI). Notable features used: `timestamps: true` everywhere; embedded arrays (`Schedule.slots`, `DietPlan.meals`, `Prescription.medicines`); `Mixed` type for AI JSON; TTL index on `Notification.createdAt` (30 days); unique sparse `email`/`phone`; positional `$inc` (`'slots.$.booked'`); upsert for dose logs; sessions + transactions in `medicine.service.js`.
 
 **Trade-offs.** + Flexible, nested JSON fits AI output and meal plans; easy to start. − No joins (populate = extra queries); referential integrity is up to you; multi-document atomicity needs transactions; schema drift silently loses data (as here).
 
@@ -265,7 +265,7 @@ export const validate = (schema) => (req, res, next) => {
 |---|---|---|
 | **helmet** (`app.js:24`) | Sets headers: `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Strict-Transport-Security`, `X-Frame-Options`, `Referrer-Policy`, etc. | Protects API responses only; the SPA is served separately (Vite/static host) and needs its own CSP. |
 | **cors** (`app.js:26-44`) | Allows no-origin requests, any `localhost` port outside production, and `FRONTEND_URL` list; `credentials: true`; allows `x-timezone` header. | Rejection creates an `Error` → 500 instead of 403 (🔬). |
-| **express-rate-limit** (`app.js:46-61`) | 20 req / 15 min on all `/auth` routes, 200 req / 15 min per router elsewhere, keyed by IP. | No `app.set('trust proxy', 1)` → behind a load balancer all users share one IP bucket. `/auth/me` and `/auth/refresh` count toward the strict 20 limit. In-memory store → per-process counts. |
+| **express-rate-limit** (`app.js:46-61`) | 20 req / 15 min on all `/auth` routes; 200 req / 15 min shared across all other routers (one limiter instance); keyed by IP. | No `app.set('trust proxy', 1)` → behind a load balancer all users share one IP bucket. `/auth/me` and `/auth/refresh` count toward the strict 20 limit. In-memory store → per-process counts. |
 | **cookie-parser** (`app.js:71`) | Parses `Cookie` header → `req.cookies.refreshToken`. | Unsigned cookies (fine: JWT is already signed). |
 
 **Interview Q&A**

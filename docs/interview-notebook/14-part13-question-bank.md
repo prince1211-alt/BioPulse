@@ -11,7 +11,7 @@ Part 2 (security, frontend, performance, testing, deployment, system design, lim
 
 **Q1 ★ 🟢 Tell me about BioPulse.**
 1. *Say:* "BioPulse is a full-stack healthcare app. Patients track medicines, book doctors, upload lab reports that are read by OCR and explained by an AI model, and manage their diet. Doctors publish time slots, run a live token queue and write digital prescriptions. It's React on the front, Node and Express with MongoDB on the back, and Redis with BullMQ for background jobs like OCR, AI analysis and reminders."
-2. *Detail:* 63 REST endpoints, 8 Mongo models, 6 BullMQ queues, Socket.IO, Groq Llama 3.3 for analysis and chat, Cloudinary storage, FCM + email notifications.
+2. *Detail:* 63 REST endpoints, 9 Mongoose models (8 model files), 6 BullMQ queues, Socket.IO, Groq Llama 3.3 for analysis and chat, Cloudinary storage, FCM + email notifications.
 3. *Evidence:* `backend/src/app.js` (9 routers), `models/`, `queues/index.js`, `workers/index.js`.
 4. *Follow-up:* "What was the hardest part?"
 5. *Answer:* "The report pipeline: an upload must return quickly, but OCR plus an LLM call can take a minute. So the upload only stores the file and creates a `pending` record, and two queues with retries do the heavy work while the UI polls a status endpoint. One known weakness I would fix next: PDFs crash the OCR worker, because pdf-parse v2 changed its API and the fallback sends a PDF to Tesseract." *(Only describe how you personally found it if that is true — see Part XV.)*

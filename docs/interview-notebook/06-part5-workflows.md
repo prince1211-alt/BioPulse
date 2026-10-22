@@ -33,7 +33,7 @@ sequenceDiagram
   SV->>DB: findByIdAndUpdate(refresh_token = bcrypt(refresh))
   SV-->>C: {user, accessToken, refreshToken}
   C-->>S: 201 {data:{user, accessToken}} + Set-Cookie refreshToken (httpOnly, SameSite=Strict)
-  S->>S: localStorage.accessToken; authStore.setAuth(); navigate('/dashboard')
+  S->>S: localStorage.accessToken, authStore.setAuth(), navigate('/dashboard')
 ```
 
 - **Request:** `{"name":"Asha Rao","email":"asha@x.com","password":"secret12","role":"patient"}`
@@ -62,7 +62,7 @@ sequenceDiagram
   AX->>API: POST /auth/refresh (cookie, withCredentials)
   API->>DB: verify JWT, compare with stored hash, rotate
   API-->>AX: 200 {accessToken} + new cookie
-  AX->>AX: localStorage.accessToken = new; processQueue()
+  AX->>AX: localStorage.accessToken = new, processQueue()
   AX->>API: retry GET /medicines (new Bearer)
   API-->>L: 200 data
 ```
@@ -104,7 +104,7 @@ sequenceDiagram
   W->>N: dispatch(title "Medicine Reminder", body "It's time to take…", emailOpts)
   N->>DB: Notification.create
   N->>Q: PUBLISH notifications {userId,payload}
-  N-->>N: FCM send (if token) ; email (if address)
+  N-->>N: FCM send (if token) , email (if address)
 ```
 
 - **Preconditions:** the worker process must be running (`npm run worker`), because `server.js` never starts workers (BUG-01, 🔬).
@@ -128,7 +128,7 @@ sequenceDiagram
   AX->>API: header x-timezone: Asia/Kolkata
   API->>SV: (userId, tz)
   SV->>DB: Promise.all([active medicines in range, logs in range])
-  SV->>SV: Map logs by "medId-ms"; expand times → dayjs.tz → status
+  SV->>SV: Map logs by "medId-ms", expand times → dayjs.tz → status
   API-->>P: [{medicine, scheduled_at, status, log_id, notes}] sorted
   P->>P: user clicks Pending → Taken
   P->>API: POST /medicines/log {medicine_id, scheduled_at ISO, status:"taken"}
@@ -167,9 +167,9 @@ sequenceDiagram
   API-->>A: schedules
   A->>API: POST / {doctor_id, scheduled_at: slot.time, type:"consultation"}
   API->>SV: bookAppointment
-  SV->>DB: findOne schedule(doctor,date) ; check capacity ; check duplicate
+  SV->>DB: findOne schedule(doctor,date) , check capacity , check duplicate
   SV->>DB: countDocuments(day, not cancelled) → token = n+1
-  SV->>DB: Appointment.create ; Schedule $inc slots.$.booked
+  SV->>DB: Appointment.create , Schedule $inc slots.$.booked
   SV->>Q: delayed jobs appt-<id>-24h / -1h (if in future)
   API-->>A: 201 {…, doctor:{name,specialisation}, token_number}
   A->>A: invalidate ['appointments'], ['doctorSchedules']
@@ -200,7 +200,7 @@ sequenceDiagram
     P->>API: GET /doctors/:doctorId/queue
   end
   D->>API: PATCH /:id/queue-status {queue_status:"in_consultation"}
-  API->>API: filter {_id, doctor_id: me}; set queue_status
+  API->>API: filter {_id, doctor_id: me}, set queue_status
   D->>API: PATCH /:id/queue-status {queue_status:"completed"} → also status=completed
   P->>P: shows "Serving now: 2", "1 patient(s) ahead", "~30 mins"
 ```

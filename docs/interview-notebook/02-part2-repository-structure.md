@@ -303,7 +303,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   main[main.jsx] --> App[App.jsx]
-  App --> pages[pages/* (lazy)]
+  App --> pages["pages/* (lazy)"]
   App --> Bell[NotificationBell]
   App --> Chat[SmartChatbot]
   App --> useFCM
