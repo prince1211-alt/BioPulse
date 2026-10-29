@@ -6,35 +6,8 @@ import { chatApi } from '../api/chat.api';
 import { useAuthStore } from '../stores/authStore';
 import { Button } from './ui/Button';
 
-// Simple custom formatter for markdown-like text
-function formatMessage(text) {
-  if (!text) return '';
-  
-  // Format bold
-  let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  
-  // Format bullet points
-  const lines = formatted.split('\n');
-  const processedLines = lines.map(line => {
-    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-      return `<li class="ml-4 list-disc my-1">${line.trim().substring(2)}</li>`;
-    }
-    return line;
-  });
-  
-  formatted = processedLines.join('\n');
-  
-  // Wrap consecutive <li> in <ul>
-  formatted = formatted.replace(/(<li.*<\/li>)/gs, '<ul class="my-2">$1</ul>');
-  
-  // Convert newlines to breaks (ignoring list items)
-  formatted = formatted.split('\n').map(line => {
-    if (line.includes('<li') || line.includes('<ul') || line.includes('</ul')) return line;
-    return line + '<br/>';
-  }).join('');
-  
-  return <div className="space-y-1 text-sm text-foreground/90 leading-relaxed" dangerouslySetInnerHTML={{ __html: formatted }} />;
-}
+import { ChatText } from './ChatText';
+const formatMessage = text => <ChatText text={text} />;
 
 export function SmartChatbot() {
   const { isLoggedIn, user } = useAuthStore();

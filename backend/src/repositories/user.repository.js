@@ -5,7 +5,7 @@ export const findUserById = async (userId, selectFields = '-password_hash -refre
 };
 
 export const updateUserById = async (userId, updateData, selectFields = '-password_hash -refresh_token') => {
-  return await User.findByIdAndUpdate(userId, updateData, { new: true }).select(selectFields);
+  return await User.findByIdAndUpdate(userId, updateData, { returnDocument: 'after', runValidators: true }).select(selectFields);
 };
 
 export const findDoctorById = async (doctorId) => {

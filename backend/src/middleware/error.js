@@ -10,7 +10,7 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   if (err.name === 'ZodError') {
-    return sendError(res, 'VALIDATION_ERROR', err.errors[0].message, 400);
+    return sendError(res, 'VALIDATION_ERROR', err.issues?.[0]?.message || 'Invalid request body', 400);
   }
 
   if (err.name === 'CastError') {
@@ -18,8 +18,7 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   if (err.code === 11000) {
-    const value = err.errmsg ? err.errmsg.match(/(["'])(\\?.)*?\1/)[0] : 'Duplicate field value';
-    return sendError(res, 'DUPLICATE_ERROR', `Duplicate field value: ${value}. Please use another value!`, 400);
+    return sendError(res, 'DUPLICATE_ERROR', 'A record with these unique fields already exists.', 409);
   }
 
   if (err.name === 'ValidationError') {
@@ -33,6 +32,10 @@ export const errorHandler = (err, req, res, next) => {
   if (err.name === 'TokenExpiredError') {
     return sendError(res, 'TOKEN_EXPIRED', 'Your token has expired! Please log in again.', 401);
   }
+
+  if (err.type === 'entity.parse.failed') return sendError(res, 'VALIDATION_ERROR', 'Invalid JSON body', 400);
+  if (err.type === 'entity.too.large') return sendError(res, 'PAYLOAD_TOO_LARGE', 'Request body is too large', 413);
+  if (err.name === 'MulterError') return sendError(res, 'UPLOAD_ERROR', err.message, err.code === 'LIMIT_FILE_SIZE' ? 413 : 400);
 
   const message = env.NODE_ENV === 'production' ? 'Internal Server Error' : err.message;
   return sendError(res, 'SERVER_ERROR', message, 500);

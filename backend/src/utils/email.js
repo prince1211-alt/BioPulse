@@ -15,7 +15,8 @@ const transporter = nodemailer.createTransport({
   socketTimeout:     10_000,
 });
 
-if (env.NODE_ENV !== 'test') {
+const configured = env.SMTP_USER !== 'mock' && env.SMTP_PASS !== 'mock';
+if (configured && env.NODE_ENV !== 'test') {
   transporter.verify().catch((err) => {
     console.warn('⚠️  [Email] SMTP connection check failed:', err.message);
     console.warn('⚠️  [Email] Email notifications will be disabled until SMTP is reachable.');
@@ -23,7 +24,7 @@ if (env.NODE_ENV !== 'test') {
 }
 
 export const sendEmail = async (to, subject, html, text) => {
-  if (env.NODE_ENV === 'test') return;
+  if (!configured || env.NODE_ENV === 'test') return;
 
   if (!to || !subject || !html) {
     console.warn('[Email] Skipped — missing required fields (to, subject, html)');

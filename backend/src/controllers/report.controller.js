@@ -1,3 +1,4 @@
+import { AppError } from '../utils/AppError.js';
 import { success } from '../utils/response.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import * as reportService from '../services/report.service.js';
@@ -13,7 +14,7 @@ function noCache(res) {
 
 export const uploadReport = asyncHandler(async (req, res) => {
   if (!req.file) {
-    return success(res, null, 'No file provided', 400);
+    throw new AppError('A report file is required', 400, 'VALIDATION_ERROR');
   }
   const result = await reportService.uploadReport(req.userId, req.body, req.file);
   return success(res, result.report, result.message, 201);

@@ -41,6 +41,8 @@ const scheduleSchema = new mongoose.Schema(
       min: 1,
       default: 1,
     },
+    timezone: { type: String, default: 'Asia/Kolkata' },
+    next_token: { type: Number, default: 0 },
     slots: {
       type: [slotSchema],
       default: [],
@@ -50,5 +52,7 @@ const scheduleSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+scheduleSchema.index({ doctor_id: 1, date: 1 }, { unique: true });
 
 export const Schedule = mongoose.model('Schedule', scheduleSchema);

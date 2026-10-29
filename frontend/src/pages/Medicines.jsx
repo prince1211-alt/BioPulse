@@ -50,7 +50,7 @@ function MedicineModal({ medicine, onClose }) {
       const payload = {
         ...data,
         times:    data.times.split(',').map((t) => t.trim()).filter(Boolean),
-        end_date: data.end_date || undefined,
+        end_date: data.end_date || null,
       };
       return isEdit
         ? medicineApi.update(medicine._id, payload)

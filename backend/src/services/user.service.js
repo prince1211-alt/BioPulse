@@ -1,3 +1,4 @@
+import { serializeReport } from '../utils/cloudinary.js';
 import { AppError } from '../utils/AppError.js';
 import * as userRepo from '../repositories/user.repository.js';
 import { HealthReport } from '../models/HealthReport.js';
@@ -9,6 +10,7 @@ const PATIENT_ALLOWED_FIELDS = [
   'name', 'age', 'gender', 'height', 'weight',
   'calorie_goal', 'fcm_token', 'avatar_url',
   'blood_group', 'allergies', 'chronic_conditions', 'emergency_contact',
+  'conditions', 'patient_type', 'goal',
 ];
 const DOCTOR_ALLOWED_FIELDS = [
   'name', 'fcm_token', 'avatar_url',
@@ -33,6 +35,8 @@ export const updateUserProfile = async (userId, role, data) => {
   const updateData = {};
   allowedFields.forEach((field) => { if (data[field] !== undefined) updateData[field] = data[field]; });
   if (Object.keys(updateData).length === 0) throw new AppError('No valid fields provided', 400, 'VALIDATION_ERROR');
+  if (data.chronic_conditions !== undefined) updateData.conditions = data.chronic_conditions;
+  if (data.conditions !== undefined) updateData.chronic_conditions = data.conditions;
   const user = await userRepo.updateUserById(userId, updateData);
   if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
   return user;
@@ -47,8 +51,9 @@ export const getDoctorProfile = async (doctorId) => {
 export const getAllUsers = async (roleFilter, page = 1, limit = 20) => {
   const filter = {};
   if (roleFilter && ['patient', 'doctor', 'admin'].includes(roleFilter)) filter.role = roleFilter;
-  const skip = (Math.max(parseInt(page), 1) - 1) * Math.min(parseInt(limit), 100);
-  const lim  = Math.min(parseInt(limit), 100);
+  page = Math.max(1, parseInt(page) || 1);
+  const lim = Math.max(1, Math.min(parseInt(limit) || 20, 100));
+  const skip = (page - 1) * lim;
   const { users, total } = await userRepo.findUsersWithFilter(filter, skip, lim);
   return { page: parseInt(page), limit: lim, total, total_pages: Math.ceil(total / lim), users };
 };
@@ -76,7 +81,7 @@ export const getPatientHistory = async (patientId) => {
 
   return {
     patient: user,
-    reports,
+    reports: reports.map(serializeReport),
     prescriptions,
     appointments,
     medicines

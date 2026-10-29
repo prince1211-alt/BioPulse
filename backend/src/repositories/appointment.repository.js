@@ -52,7 +52,7 @@ export const findScheduleByIdAndDoctor = async (scheduleId, doctorId) => {
 };
 
 export const deleteSchedule = async (scheduleId) => {
-  return await Schedule.findByIdAndDelete(scheduleId);
+  return await Schedule.findOneAndDelete({ _id: scheduleId, slots: { $not: { $elemMatch: { booked: { $gt: 0 } } } } });
 };
 
 export const findScheduleForSlot = async (doctorId, dateString) => {

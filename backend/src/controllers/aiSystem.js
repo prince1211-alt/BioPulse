@@ -226,6 +226,7 @@ export function estimateASCVD(age, isMale, isSmoker, systolicBP, totalCholestero
 
 // ─── GENERATE HEALTH INSIGHTS ─────────────────────────────────────────────────
 export async function generateHealthInsights(data, rawText, patientMeta = {}) {
+  if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is required for AI analysis');
   const prompt = buildPrompt(data, rawText, patientMeta);
   const MAX_RETRIES = 3;
 
@@ -340,34 +341,20 @@ export async function generateHealthInsights(data, rawText, patientMeta = {}) {
     }
   }
 
-  return JSON.stringify({
-    report_type: 'unknown',
-    summary: 'AI analysis temporarily unavailable. Please retry.',
-    inferred_conditions: [], risk_score: 0,
-    risk_breakdown: { critical_count: 0, abnormal_count: 0, borderline_count: 0, normal_count: 0 },
-    clinical_scores: [], compound_risks: [], red_flags: [], drug_interaction_alerts: [],
-    key_findings: [], abnormal_values: [], positive_findings: [],
-    trend_analysis: { available: false, summary: '', trajectory: 'unknown', biomarker_trends: [] },
-    risks: [], diet_recommendations: [], lifestyle_modifications: [],
-    exercise_recommendations: { weekly_minutes: 0, intensity: 'low', plan: [], restrictions: '', cardiac_clearance_needed: false },
-    precautions: [], doctor_recommendations: [], follow_up_tests: [], monitoring_plan: [],
-    urgency: { level: 'routine', reason: 'Analysis unavailable', triage_color: 'green' },
-    patient_education: [],
-    disclaimer: 'AI analysis failed. Consult a qualified healthcare provider immediately if you have concerns.',
-  });
+  throw new Error('AI analysis is unavailable. Please retry.');
 }
 
 // ─── TREND ANALYSIS ───────────────────────────────────────────────────────────
 export async function getTrend(report) {
-  const reports = await HealthReport.find({ user_id: report.user_id, ocr_status: 'done' })
-    .sort({ createdAt: -1 })
-    .limit(5)
+  const reports = await HealthReport.find({ user_id: report.user_id, ocr_status: 'done', _id: { $ne: report._id }, report_date: { $lt: report.report_date } })
+    .sort({ report_date: -1 })
+    .limit(1)
     .lean();
 
-  if (reports.length < 2) return null;
+  if (!reports.length) return null;
 
-  const latest   = reports[0].extracted_data;
-  const previous = reports[1].extracted_data;
+  const latest = report.extracted_data;
+  const previous = reports[0].extracted_data;
 
   const delta = (path) => {
     const keys = path.split('.');
@@ -375,7 +362,7 @@ export async function getTrend(report) {
     for (const k of keys) { a = a?.[k]; b = b?.[k]; }
     if (typeof a !== 'number' || typeof b !== 'number') return null;
     const diff  = parseFloat((a - b).toFixed(2));
-    const pct   = parseFloat(((diff / b) * 100).toFixed(1));
+    const pct   = b === 0 ? null : parseFloat(((diff / b) * 100).toFixed(1));
     return { previous: b, current: a, absolute_change: diff, percent_change: pct, direction: diff > 0 ? 'up' : diff < 0 ? 'down' : 'stable' };
   };
 

@@ -3,7 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import * as medicineService from '../services/medicine.service.js';
 
 export const createMedicine = asyncHandler(async (req, res) => {
-  const medicine = await medicineService.createMedicine(req.userId, req.body);
+  const medicine = await medicineService.createMedicine(req.userId, { ...req.body, timezone: req.body.timezone || req.headers['x-timezone'] });
   return success(res, medicine, 'Medicine created', 201);
 });
 
@@ -39,6 +39,6 @@ export const getTodaySchedule = asyncHandler(async (req, res) => {
 });
 
 export const getAdherenceStats = asyncHandler(async (req, res) => {
-  const stats = await medicineService.getAdherenceStats(req.userId, req.query.days);
+  const stats = await medicineService.getAdherenceStats(req.userId, req.query.days, req.headers['x-timezone']);
   return success(res, stats);
 });

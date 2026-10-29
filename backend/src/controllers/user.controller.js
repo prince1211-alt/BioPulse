@@ -1,3 +1,4 @@
+import { refreshCookieOptions } from '../utils/cookies.js';
 import { success } from '../utils/response.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import * as userService from '../services/user.service.js';
@@ -30,7 +31,7 @@ export const getUserById = asyncHandler(async (req, res) => {
 
 export const deleteAccount = asyncHandler(async (req, res) => {
   await userService.deleteUserAccount(req.userId);
-  res.clearCookie('refreshToken');
+  res.clearCookie('refreshToken', refreshCookieOptions());
   return success(res, { deleted: true }, 'Account deleted');
 });
 

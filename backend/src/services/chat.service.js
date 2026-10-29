@@ -21,6 +21,7 @@ Instructions:
 3. Do NOT make firm medical diagnoses, prescribe specific dosages, or replace professional medical consultations. Always recommend consulting a certified doctor on BioPulse for serious symptoms.
 4. Keep responses concise (under 250 words) and structure them beautifully with markdown.`;
 
+  if (!process.env.GROQ_API_KEY) throw new AppError('AI service is not configured', 503, 'AI_UNAVAILABLE');
   const messages = [
     { role: 'system', content: systemPrompt },
     ...(history || []).map(h => ({ role: h.role, content: h.content })),

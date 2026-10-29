@@ -4,7 +4,7 @@ export const bookAppointmentSchema = z.object({
   doctor_id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID'),
   scheduled_at: z.string().datetime(),
   
-  type: z.enum(['checkup', 'follow-up', 'consultation', 'lab']),
+  type: z.enum(['checkup', 'follow-up', 'consultation', 'lab']).default('consultation'),
   notes: z.string().optional(),
 });
 
@@ -23,7 +23,8 @@ export const updateStatusSchema = z.object({
 });
 
 export const addScheduleSchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+  timezone: z.string().optional(),
+  date: z.iso.date(),
   start_time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Start time must be HH:mm'),
   end_time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'End time must be HH:mm'),
   slot_duration: z.number().int().min(5, 'Duration must be at least 5 minutes').max(120),

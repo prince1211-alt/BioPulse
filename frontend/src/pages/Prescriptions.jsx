@@ -19,8 +19,6 @@ function PrescriptionDetailModal({ prescriptionId, onClose }) {
   const p = prescriptionRes;
 
   const handlePrint = () => {
-    const printContent = document.getElementById('printable-prescription');
-    const originalContent = document.body.innerHTML;
     
     // Simple custom print logic
     const style = document.createElement('style');

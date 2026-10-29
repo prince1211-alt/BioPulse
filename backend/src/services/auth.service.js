@@ -1,4 +1,9 @@
+import { disconnectUserSockets } from '../config/socket.js';
 import bcrypt from 'bcrypt';
+import { createHash } from 'node:crypto';
+
+// Hash the complete JWT. bcrypt truncates inputs after 72 bytes.
+export const hashRefreshToken = token => createHash('sha256').update(token).digest('hex');
 import { User } from '../models/User.js';
 import { generateTokens, verifyRefreshToken } from '../utils/jwt.js';
 import { AppError } from '../utils/AppError.js';
@@ -17,7 +22,7 @@ const sanitizeUser = (user) => {
 };
 
 export const registerUser = async (data) => {
-  const { email, password, role, name, ...rest } = data;
+  const { email, password, role, name, specialisation } = data;
 
   const existing = await User.findOne({ email: email.toLowerCase() });
   if (existing) {
@@ -33,7 +38,7 @@ export const registerUser = async (data) => {
     role: validRole,
     name: name.trim(),
     permissions: ROLE_PERMISSIONS[validRole],
-    ...rest,
+    ...(validRole === 'doctor' ? { specialisation } : {}),
   });
 
   await user.save();
@@ -41,9 +46,10 @@ export const registerUser = async (data) => {
   const { accessToken, refreshToken } = generateTokens({
     id: user._id.toString(),
     role: user.role,
+    version: user.token_version || 0,
   });
 
-  const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+  const hashedRefreshToken = hashRefreshToken(refreshToken);
   await User.findByIdAndUpdate(user._id, { refresh_token: hashedRefreshToken });
 
   return {
@@ -72,12 +78,14 @@ export const loginUser = async (email, password) => {
   const { accessToken, refreshToken } = generateTokens({
     id: user._id.toString(),
     role: user.role,
+    version: user.token_version || 0,
   });
 
-  const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+  const hashedRefreshToken = hashRefreshToken(refreshToken);
   await User.findByIdAndUpdate(user._id, {
     refresh_token: hashedRefreshToken,
     last_login: new Date(),
+    token_version: user.token_version || 0,
   });
 
   return {
@@ -88,8 +96,9 @@ export const loginUser = async (email, password) => {
 };
 
 export const logoutUser = async (userId) => {
+  disconnectUserSockets(userId);
   if (userId) {
-    await User.findByIdAndUpdate(userId, { refresh_token: null });
+    await User.findByIdAndUpdate(userId, { refresh_token: null, fcm_token: null, $inc: { token_version: 1 } });
   }
 };
 
@@ -106,20 +115,27 @@ export const refreshUserToken = async (token) => {
     throw new AppError('Session expired, please login again', 401, 'INVALID_TOKEN');
   }
 
-  const isMatch = await bcrypt.compare(token, user.refresh_token);
+  if (user.is_banned) throw new AppError('Your account has been suspended', 403, 'ACCOUNT_BANNED');
+  if ((decoded.version || 0) !== (user.token_version || 0)) throw new AppError('Session expired', 401, 'INVALID_TOKEN');
+  const isMatch = hashRefreshToken(token) === user.refresh_token;
   if (!isMatch) {
     
-    await User.findByIdAndUpdate(user._id, { refresh_token: null });
+    await User.updateOne({ _id: user._id, refresh_token: user.refresh_token }, { refresh_token: null, $inc: { token_version: 1 } });
     throw new AppError('Token reuse detected, please login again', 401, 'TOKEN_REUSE');
   }
 
   const { accessToken, refreshToken: newRefreshToken } = generateTokens({
     id: user._id.toString(),
     role: user.role,
+    version: user.token_version || 0,
   });
 
-  const hashedNew = await bcrypt.hash(newRefreshToken, 10);
-  await User.findByIdAndUpdate(user._id, { refresh_token: hashedNew });
+  const hashedNew = hashRefreshToken(newRefreshToken);
+  const rotated = await User.findOneAndUpdate(
+    { _id: user._id, refresh_token: user.refresh_token, token_version: user.token_version || 0 },
+    { refresh_token: hashedNew }
+  );
+  if (!rotated) throw new AppError('Session was already refreshed; retry with the current session', 401, 'INVALID_TOKEN');
 
   return { accessToken, refreshToken: newRefreshToken };
 };
@@ -139,7 +155,9 @@ export const changeUserPassword = async (userId, current_password, new_password)
     throw new AppError('Current password is incorrect', 401, 'INVALID_CREDENTIALS');
   }
 
+  disconnectUserSockets(userId);
   user.password_hash = await bcrypt.hash(new_password, 10);
+  user.token_version = (user.token_version || 0) + 1;
   user.refresh_token = null; 
   await user.save();
 };
@@ -153,10 +171,11 @@ export const verifyUserAuth = async (userId) => {
 };
 
 export const banUnbanUser = async (userId, ban) => {
+  if (ban) disconnectUserSockets(userId);
   const user = await User.findByIdAndUpdate(
     userId,
-    { is_banned: !!ban, ...(ban ? { refresh_token: null } : {}) },
-    { new: true }
+    { is_banned: !!ban, ...(ban ? { refresh_token: null, $inc: { token_version: 1 } } : {}) },
+    { returnDocument: 'after' }
   ).select('-password_hash -refresh_token');
 
   if (!user) {
@@ -167,7 +186,8 @@ export const banUnbanUser = async (userId, ban) => {
 };
 
 export const updateFcmToken = async (userId, fcm_token) => {
-  const user = await User.findByIdAndUpdate(userId, { fcm_token }, { new: true });
+  await User.updateMany({ _id: { $ne: userId }, fcm_token }, { $unset: { fcm_token: '' } });
+  const user = await User.findByIdAndUpdate(userId, { fcm_token }, { returnDocument: 'after' });
   if (!user) {
     throw new AppError('User not found', 404, 'NOT_FOUND');
   }

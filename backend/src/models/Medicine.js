@@ -22,9 +22,9 @@ const medicineSchema = new mongoose.Schema(
       type: String,   
     },
 
-    frequency: {
-      type: String,   
-    },
+    frequency: { type: String, enum: ['daily', 'weekly', 'custom'], default: 'daily' },
+    timezone: { type: String, default: 'Asia/Kolkata' },
+    days_of_week: [Number],
 
     times: {
       type: [String],
@@ -99,6 +99,8 @@ const medicineLogSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+medicineLogSchema.index({ medicine_id: 1, user_id: 1, scheduled_at: 1 }, { unique: true });
 
 export const Medicine = mongoose.model('Medicine', medicineSchema);
 export const MedicineLog = mongoose.model('MedicineLog', medicineLogSchema);

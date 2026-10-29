@@ -1,21 +1,21 @@
 import { z } from 'zod';
 
 export const registerSchema = z.object({
-  name: z.string().min(3, 'Name must be at least 3 characters'),
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-  role: z.enum(['patient', 'doctor', 'admin']).optional(),
-  specialisation: z.string().optional(),
+  name: z.string().trim().min(3, 'Name must be at least 3 characters').max(100),
+  email: z.string().trim().email('Invalid email address').transform(v => v.toLowerCase()),
+  password: z.string().min(6, 'Password must be at least 6 characters').refine(v => Buffer.byteLength(v, 'utf8') <= 72, 'Password must be at most 72 bytes'),
+  role: z.enum(['patient', 'doctor']).default('patient'),
+  specialisation: z.string().trim().max(100).optional(),
 });
 
 export const loginSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: z.string().trim().email('Invalid email address').transform(v => v.toLowerCase()),
   password: z.string().min(1, 'Password is required'),
 });
 
 export const changePasswordSchema = z.object({
   current_password: z.string().min(1, 'Current password is required'),
-  new_password: z.string().min(6, 'New password must be at least 6 characters'),
+  new_password: z.string().min(6, 'New password must be at least 6 characters').refine(v => Buffer.byteLength(v, 'utf8') <= 72, 'Password must be at most 72 bytes'),
 });
 
 export const updateFcmTokenSchema = z.object({
