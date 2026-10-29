@@ -36,4 +36,4 @@ Live Cloudinary upload/deletion, Groq output quality, SMTP delivery, Firebase pu
 
 ## Validation result
 
-The final local checks pass: 47 backend tests, 6 frontend tests, frontend ESLint and the production build. Full `npm audit` reports zero known vulnerabilities in each package tree at the time of this audit. This is a point-in-time dependency database result, not proof of absence of security defects. Vite emits a non-blocking bundle-size warning.
+The final local checks pass: 50 backend tests, 6 frontend tests, frontend ESLint and the production build. Full `npm audit` reports zero known vulnerabilities in each package tree at the time of this audit. This is a point-in-time dependency database result, not proof of absence of security defects. Vite emits a non-blocking bundle-size warning.
