@@ -51,4 +51,6 @@ const appointmentSchema = new mongoose.Schema(
   }
 );
 
+appointmentSchema.index({ user_id: 1, doctor_id: 1, scheduled_at: 1 }, { unique: true, partialFilterExpression: { status: { $in: ['scheduled', 'confirmed', 'rescheduled'] } } });
+
 export const Appointment = mongoose.model('Appointment', appointmentSchema);

@@ -44,7 +44,7 @@ const STATUS_COLORS = {
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 function useReportPolling(reportId, enabled) {
-  const startedAt = useRef(Date.now());
+  const startedAt = useRef(null);
 
   // Reset timer whenever polling is newly enabled (e.g. after re-analyze)
   useEffect(() => {
@@ -53,9 +53,10 @@ function useReportPolling(reportId, enabled) {
 
   return useQuery({
     queryKey: ['reportStatus', reportId],
-    queryFn:  () => reportApi.getStatus(reportId).then((r) => r.data),
+    queryFn:  () => reportApi.getStatus(reportId).then((r) => r.data.data),
     enabled:  !!reportId && enabled,
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
+      const data = query.state.data;
       // Stop if done or failed
       if (data?.ready) return false;
       if (data?.ocr_status === 'failed' || data?.analysis_status === 'failed') return false;
@@ -132,7 +133,7 @@ function ReportCard({ report, onDelete, onReanalyze }) {
                   liveReport.report_type || 'Lab Report'}
               </CardTitle>
               <CardDescription className="text-xs">
-                {format(new Date(liveReport.report_date || Date.now()), 'MMMM dd, yyyy')}
+                {liveReport.report_date ? format(new Date(liveReport.report_date), 'MMMM dd, yyyy') : 'Date unavailable'}
               </CardDescription>
             </div>
           </div>
@@ -494,7 +495,8 @@ export function ReportsPage() {
     queryFn:  () => reportApi.getAll().then((r) => r.data),
     // FALLBACK: If any report is in processing/analyzing state, 
     // poll the entire list every 5s as a safety net for sockets.
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
+      const data = query.state.data;
       const reports = data?.reports || data?.data?.reports || [];
       const hasProcessing = reports.some(r => 
         ['processing', 'pending', 'analyzing'].includes(r.ocr_status) || 

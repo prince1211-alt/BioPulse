@@ -13,6 +13,9 @@ export const updateProfileSchema = z.object({
   allergies: z.array(z.string()).optional(),
   chronic_conditions: z.array(z.string()).optional(),
   emergency_contact: z.string().optional(),
+  conditions: z.array(z.string()).optional(),
+  patient_type: z.enum(['general', 'diabetic', 'hypertensive', 'renal']).optional(),
+  goal: z.enum(['maintenance', 'weight_loss', 'weight_gain']).optional(),
 
   // Doctor specific
   specialisation: z.string().optional(),

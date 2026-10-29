@@ -1,3 +1,4 @@
+import { chatSchema } from '../schemas/chat.schema.js';
 import { Router } from 'express';
 import {
   getCurrentPlan,
@@ -23,7 +24,7 @@ router.get('/current',         getCurrentPlan);
 router.get('/history',         getDietHistory);
 router.get('/recommendations', getDietRecommendations);
 router.post('/generate',       generatePlan);
-router.post('/chat',           chatDietAssistant);
+router.post('/chat',           validate(chatSchema), chatDietAssistant);
 router.get('/search',          searchFoods);
 router.post('/meal',           validate(addCustomMealSchema), addCustomMeal);
 router.delete('/meal/:meal_type/:itemId', removeCustomMeal);

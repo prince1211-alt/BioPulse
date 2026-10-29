@@ -22,6 +22,7 @@ const mealItemSchema = new mongoose.Schema({
 
 const dayPlanSchema = new mongoose.Schema(
   {
+    restrictions: [String],
     day: {
       type: String,
     },

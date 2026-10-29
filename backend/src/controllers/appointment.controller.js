@@ -13,7 +13,7 @@ export const getDoctorSchedules = asyncHandler(async (req, res) => {
 });
 
 export const addSchedule = asyncHandler(async (req, res) => {
-  const schedule = await appointmentService.addDoctorSchedule(req.userId, req.body);
+  const schedule = await appointmentService.addDoctorSchedule(req.userId, { ...req.body, timezone: req.body.timezone || req.headers['x-timezone'] });
   return success(res, schedule, `Schedule created with ${schedule.slots.length} slots`);
 });
 
@@ -58,6 +58,6 @@ export const updateQueueStatus = asyncHandler(async (req, res) => {
 });
 
 export const getDoctorQueue = asyncHandler(async (req, res) => {
-  const result = await appointmentService.getDoctorQueueStatus(req.params.id);
+  const result = await appointmentService.getDoctorQueueStatus(req.params.id, req.userId, req.userRole, req.headers['x-timezone']);
   return success(res, result);
 });

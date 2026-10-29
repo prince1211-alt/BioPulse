@@ -23,10 +23,10 @@ export const dispatchNotification = async ({
     });
 
     const user = await User.findById(userId).lean();
-    if (!user) return notification;
+    if (!user || user.is_banned) return notification;
 
     try {
-      await redisConnection.publish(
+      if (redisConnection.status === 'ready') await redisConnection.publish(
         'notifications',
         JSON.stringify({
           userId: String(userId),

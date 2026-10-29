@@ -1,12 +1,13 @@
-import admin from 'firebase-admin';
+import { getApps, initializeApp, applicationDefault, cert } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 let isInitialized = false;
 
 try {
-  if (!admin.apps.length) {
+  if (!getApps().length) {
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
+      initializeApp({
+        credential: applicationDefault(),
       });
       isInitialized = true;
       console.log('✅ [FCM] Firebase Admin initialized via file credentials');
@@ -16,8 +17,8 @@ try {
       const privateKey = process.env.FIREBASE_PRIVATE_KEY || process.env.PRIVATE_KEY;
       
       if (projectId && clientEmail && privateKey) {
-        admin.initializeApp({
-          credential: admin.credential.cert({
+        initializeApp({
+          credential: cert({
             projectId,
             clientEmail,
             
@@ -66,7 +67,7 @@ export const sendPushNotification = async (token, title, body, data = {}) => {
   };
 
   try {
-    const response = await admin.messaging().send(message);
+    const response = await getMessaging().send(message);
     console.log(`✅ [FCM] Sent → ${token.slice(0, 20)}... | messageId: ${response}`);
   } catch (err) {
     

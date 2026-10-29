@@ -7,6 +7,7 @@ import { SmartChatbot } from './components/SmartChatbot';
 import { useAuthStore } from './stores/authStore';
 import { useNotificationStore } from './stores/notificationStore';
 import { authApi } from './api/auth.api';
+import { useSocket } from './hooks/useSocket';
 import { useFCM } from './hooks/useFCM';
 import { NotificationBell } from './components/NotificationBell';
 
@@ -47,6 +48,7 @@ const Layout = ({ children }) => {
 
   // Register device for push notifications on first authenticated mount
   useFCM();
+  useSocket();
 
   const handleLogout = async () => {
     try {
@@ -192,7 +194,7 @@ const Layout = ({ children }) => {
 
 // ─── Auth guard on app load ───────────────────────────────────────────────────
 
-function AuthVerifier() {
+function AuthVerifier({ children }) {
   const { isLoggedIn, clearAuth, setUser } = useAuthStore();
   const [checking, setChecking] = useState(true);
 
@@ -207,8 +209,8 @@ function AuthVerifier() {
         const fresh = res.data?.data || res.data;
         if (fresh) setUser(fresh);
       })
-      .catch(() => {
-        clearAuth();
+      .catch(err => {
+        if ([401, 403].includes(err.status)) clearAuth();
       })
       .finally(() => {
         setChecking(false);
@@ -216,9 +218,9 @@ function AuthVerifier() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (checking && isLoggedIn) return null;
+  if (checking && isLoggedIn) return <SuspenseFallback />;
 
-  return null;
+  return children;
 }
 
 // ─── Verified protected route ─────────────────────────────────────────────────
@@ -234,8 +236,7 @@ function App() {
   return (
     <BrowserRouter>
       <Toaster richColors position="top-center" />
-      <AuthVerifier />
-
+      <AuthVerifier>
       <Suspense fallback={<SuspenseFallback />}>
         <Routes>
           {/* Public routes */}
@@ -256,6 +257,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      </AuthVerifier>
     </BrowserRouter>
   );
 }

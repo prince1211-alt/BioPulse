@@ -31,6 +31,8 @@ export const getCurrentDietPlan = async (userId) => {
 };
 
 export const getDietHistory = async (userId, page = 1, limit = 10) => {
+  page = Math.max(1, parseInt(page) || 1);
+  limit = Math.max(1, Math.min(parseInt(limit) || 10, 50));
   const skip = (page - 1) * limit;
   const { plans, total } = await dietRepo.findDietHistory(userId, skip, limit);
   return { page, limit, total, total_pages: Math.ceil(total / limit), plans };
@@ -77,7 +79,7 @@ export const generateDietPlan = async (userId, overridePatientType) => {
     goal,
     bmr,
     patient_type:   patientType,
-    ai_generated:   true,
+    ai_generated:   false,
     is_active:      true,
   });
 
@@ -120,6 +122,7 @@ export const addCustomMealToPlan = async (userId, meal_type, items) => {
 
   const patientType = normalizePatientType(user);
 
+  if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
   if (!plan) {
     let bmr = 1500; 
     try {
@@ -143,6 +146,7 @@ export const addCustomMealToPlan = async (userId, meal_type, items) => {
     });
   }
 
+  if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
   if (!Array.isArray(plan.meals) || plan.meals.length === 0) {
     plan.meals = [{ day: 'Today', meals: {} }];
   }
@@ -171,7 +175,7 @@ export const addCustomMealToPlan = async (userId, meal_type, items) => {
 
     const calcCal = (p * 4) + (c * 4) + (f * 9);
 
-    const finalCal = calcCal > 0 ? calcCal : inputCal;
+    const finalCal = inputCal > 0 ? inputCal : calcCal;
 
     return { ...item, calories: finalCal, macros: { protein: p, carbs: c, fat: f } };
   });
@@ -186,8 +190,6 @@ export const addCustomMealToPlan = async (userId, meal_type, items) => {
     }
   }
   
-  console.log(`[DEBUG] currentDailyTotal=${currentDailyTotal}, addedCal=${addedCal}, meal_type=${meal_type}`);
-  console.log(`[DEBUG] todayPlan.meals=${JSON.stringify(todayPlan.meals)}`);
 
   if (currentDailyTotal + addedCal > 4000) {
     throw new AppError('Daily intake would exceed the safe limit of 4000 kcal. Please verify your entries.', 400);
@@ -250,6 +252,7 @@ Always tailor your advice to this patient type.
 Do not provide medical diagnosis, but rather focus on food choices, meal ideas, and general dietary guidelines suitable for this condition.
 Keep your responses relatively brief (2-4 short paragraphs maximum) and easy to read. You can use markdown (like bolding or bullet points) to format your response.`;
 
+  if (!process.env.GROQ_API_KEY) throw new AppError('AI service is not configured', 503, 'AI_UNAVAILABLE');
   const messages = [
     { role: 'system', content: systemPrompt },
     ...(history || []).map(h => ({ role: h.role, content: h.content })),

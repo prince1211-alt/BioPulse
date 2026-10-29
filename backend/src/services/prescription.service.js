@@ -1,33 +1,30 @@
+import mongoose from 'mongoose';
+import { Schedule } from '../models/Schedule.js';
 import { Prescription } from '../models/Prescription.js';
 import { Appointment } from '../models/Appointment.js';
 import { AppError } from '../utils/AppError.js';
 
 export const createPrescription = async (doctorId, data) => {
-  const { patient_id, appointment_id, diagnosis, symptoms, medicines, advice, is_template, template_name } = data;
-
-  // Verify appointment
-  const appointment = await Appointment.findOne({ _id: appointment_id, doctor_id: doctorId });
-  if (!appointment) {
-    throw new AppError('Appointment not found or not assigned to this doctor', 404, 'NOT_FOUND');
-  }
-
-  // Create prescription
-  const prescription = await Prescription.create({
-    patient_id,
-    doctor_id: doctorId,
-    appointment_id,
-    diagnosis,
-    symptoms: symptoms || [],
-    medicines,
-    advice: advice || '',
-    is_template: !!is_template,
-    template_name: template_name || undefined,
-  });
-
-  // Mark appointment as completed
-  appointment.status = 'completed';
-  appointment.queue_status = 'completed';
-  await appointment.save();
+  const { patient_id, appointment_id, diagnosis, symptoms, medicines, advice } = data;
+  const session = await mongoose.startSession();
+  let prescription;
+  try {
+    prescription = await session.withTransaction(async () => {
+      const appointment = await Appointment.findOne({ _id: appointment_id, doctor_id: doctorId }).session(session);
+      if (!appointment) throw new AppError('Appointment not assigned to this doctor', 404, 'NOT_FOUND');
+      if (String(appointment.user_id) !== String(patient_id)) throw new AppError('Patient does not match the appointment', 400, 'VALIDATION_ERROR');
+      if (['cancelled', 'no_show'].includes(appointment.status)) throw new AppError('Cannot prescribe for an inactive appointment', 400, 'INVALID_STATUS');
+      if (await Prescription.exists({ appointment_id, is_template: false }).session(session)) throw new AppError('Prescription already exists for this appointment', 409, 'DUPLICATE_ERROR');
+      const [created] = await Prescription.create([{ patient_id, doctor_id: doctorId, appointment_id, diagnosis, symptoms: symptoms || [], medicines, advice: advice || '', is_template: false }], { session });
+      if (appointment.status !== 'completed') {
+        await Schedule.updateOne({ doctor_id: doctorId, slots: { $elemMatch: { time: appointment.scheduled_at, booked: { $gt: 0 } } } }, { $inc: { 'slots.$.booked': -1 } }, { session });
+      }
+      appointment.status = 'completed';
+      appointment.queue_status = 'completed';
+      await appointment.save({ session });
+      return created;
+    });
+  } finally { await session.endSession(); }
 
   await prescription.populate('patient_id', 'name email age gender');
   await prescription.populate('doctor_id', 'name specialisation qualification');

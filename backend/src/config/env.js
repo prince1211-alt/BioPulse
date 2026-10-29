@@ -7,6 +7,16 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+if (process.env.NODE_ENV === 'production') {
+  for (const name of ['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'FRONTEND_URL']) {
+    if (!process.env[name]) throw new Error(`${name} is required in production`);
+  }
+  const secrets = [process.env.JWT_SECRET, process.env.JWT_REFRESH_SECRET];
+  if (secrets.some(value => value.length < 32) || secrets[0] === secrets[1]) {
+    throw new Error('JWT secrets must be distinct and at least 32 characters');
+  }
+}
+
 const requiredEnvVars = [
   'DATABASE_URL',
   'REDIS_URL',
@@ -27,6 +37,7 @@ export const env = {
   PORT: process.env.PORT || '4000',
   DATABASE_URL: process.env.DATABASE_URL || 'mongodb://localhost:27017/biopulse',
   REDIS_URL: process.env.REDIS_URL || 'redis://localhost:6379',
+  TRUST_PROXY: Number(process.env.TRUST_PROXY || 0),
   ALLOWED_ORIGINS: (process.env.FRONTEND_URL || 'http://localhost:5173')
     .replace(/["']/g, '')
     .split(',')
@@ -37,8 +48,7 @@ export const env = {
   SMTP_PORT: process.env.SMTP_PORT || '587',
   SMTP_USER: process.env.SMTP_USER || 'mock',
   SMTP_PASS: process.env.SMTP_PASS || 'mock',
-  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || 'mock'
+  USDA_API_KEY: process.env.USDA_API_KEY
 };
 
 console.log(`📡 [Config] Environment PORT: ${process.env.PORT}, Final PORT: ${env.PORT}`);
-

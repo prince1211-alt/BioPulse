@@ -1,15 +1,11 @@
+import { refreshCookieOptions } from '../utils/cookies.js';
 import { success } from '../utils/response.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import * as authService from '../services/auth.service.js';
 
 const setTokenCookie = (res, token) => {
-  res.cookie('refreshToken', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000, 
-  });
+  res.cookie('refreshToken', token, { ...refreshCookieOptions(), maxAge: 7 * 24 * 60 * 60 * 1000 });
 };
 
 export const register = asyncHandler(async (req, res) => {
@@ -27,7 +23,7 @@ export const login = asyncHandler(async (req, res) => {
 
 export const logout = asyncHandler(async (req, res) => {
   await authService.logoutUser(req.userId);
-  res.clearCookie('refreshToken');
+  res.clearCookie('refreshToken', refreshCookieOptions());
   return success(res, { loggedOut: true }, 'Logout successful');
 });
 
@@ -45,7 +41,7 @@ export const refreshAccessToken = asyncHandler(async (req, res) => {
 export const changePassword = asyncHandler(async (req, res) => {
   const { current_password, new_password } = req.body;
   await authService.changeUserPassword(req.userId, current_password, new_password);
-  res.clearCookie('refreshToken');
+  res.clearCookie('refreshToken', refreshCookieOptions());
   return success(res, { passwordChanged: true }, 'Password changed. Please login again.');
 });
 
@@ -65,16 +61,3 @@ export const updateFcmToken = asyncHandler(async (req, res) => {
   const result = await authService.updateFcmToken(req.userId, req.body.fcm_token);
   return success(res, result, 'FCM token updated successfully');
 });
-
-export const validateRefreshToken = async (userId, token) => {
-  try {
-    const bcrypt = await import('bcrypt');
-    const { User } = await import('../models/User.js');
-    const user = await User.findById(userId);
-    if (!user || !user.refresh_token) return false;
-    return await bcrypt.default.compare(token, user.refresh_token);
-  } catch (err) {
-    console.error('❌ Refresh Token Validation Error:', err);
-    return false;
-  }
-};

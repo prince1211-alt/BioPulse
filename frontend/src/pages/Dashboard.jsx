@@ -9,9 +9,7 @@ import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { useAuthStore }        from '../stores/authStore';
-import { useNotificationStore } from '../stores/notificationStore';
 import { useMedicineStore }     from '../stores/medicineStore';
-import { useSocket }            from '../hooks/useSocket';
 
 import { reportApi }      from '../api/report.api';
 import { appointmentApi } from '../api/appointment.api';
@@ -182,16 +180,15 @@ function NotificationPanel() {
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export function Dashboard() {
   const { user }      = useAuthStore();
-  const { takenToday, pendingCount } = useMedicineStore();
+  const { pendingCount } = useMedicineStore();
 
   // Connect socket (registers notification handlers)
-  useSocket();
 
   const isDoctor = user?.role === 'doctor';
 
   // ── Queries ─────────────────────────────────────────────────────────────────
   const { data: reportsRes, isLoading: loadingReports, isError: isReportsError } = useQuery({
-    queryKey: ['reports'],
+    queryKey: ['reports', { page: 1, limit: 5 }],
     queryFn:  () => reportApi.getAll({ page: 1, limit: 5 }).then((r) => r.data),
   });
 

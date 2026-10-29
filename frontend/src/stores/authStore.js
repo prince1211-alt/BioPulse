@@ -15,6 +15,11 @@ export const useAuthStore = create(
         set({ user, accessToken, isLoggedIn: true });
       },
 
+      setAccessToken: accessToken => {
+        localStorage.setItem('accessToken', accessToken);
+        set({ accessToken });
+      },
+
       setUser: (user) => set({ user }),
 
       clearAuth: () => {

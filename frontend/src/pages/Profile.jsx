@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   UserCircle, Save, Key, Mail, Phone,
@@ -19,12 +19,13 @@ import {
 
 // ── Password change modal ─────────────────────────────────────────────────────
 function PasswordModal({ onClose }) {
-  const { register, handleSubmit, watch, formState: { errors } } = useForm();
+  const { register, handleSubmit, getValues, formState: { errors } } = useForm();
 
   const mutation = useMutation({
     mutationFn: (data) => authApi.changePassword(data),
     onSuccess: () => {
       toast.success('Password changed. Please log in again.');
+      useAuthStore.getState().clearAuth();
       onClose();
     },
     onError: (err) => toast.error(err.message || 'Failed to change password'),
@@ -72,7 +73,7 @@ function PasswordModal({ onClose }) {
               placeholder="Repeat new password"
               {...register('confirm', {
                 required: 'Required',
-                validate: (v) => v === watch('new_password') || 'Passwords do not match',
+                validate: (v) => v === getValues('new_password') || 'Passwords do not match',
               })}
             />
             {errors.confirm && (
@@ -97,7 +98,6 @@ function PasswordModal({ onClose }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function ProfilePage() {
   const { user, setUser } = useAuthStore();
-  const queryClient       = useQueryClient();
   const [isEditing,      setIsEditing]      = useState(false);
   const [showPassword,   setShowPassword]   = useState(false);
 
@@ -130,7 +130,7 @@ export function ProfilePage() {
 
   useEffect(() => {
     if (user) reset(buildDefaults(user));
-  }, [user]);
+  }, [user, reset]);
 
   const updateMutation = useMutation({
     mutationFn: (data) => userApi.updateProfile(data),

@@ -14,7 +14,7 @@ export const findActiveMedicines = async (userId) => {
 export const findActiveMedicineById = async (userId, medicineId, session = null) => {
   const q = Medicine.findOne({ _id: medicineId, user_id: userId, is_active: true });
   if (session) q.session(session);
-  return await q.lean ? q.lean() : q;
+  return await q.lean();
 };
 
 export const findMedicineForUpdate = async (userId, medicineId, session) => {
@@ -63,6 +63,6 @@ export const upsertDoseLog = async (medicineId, scheduledAt, userId, status, not
       taken_at: status === 'taken' ? new Date() : null,
       user_id: userId,
     },
-    { returnDocument: 'after', upsert: true }
+    { returnDocument: 'after', upsert: true, runValidators: true }
   );
 };

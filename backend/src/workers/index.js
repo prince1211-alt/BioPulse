@@ -14,9 +14,11 @@ import { User } from '../models/User.js';
 
 import Tesseract from 'tesseract.js';
 import axios from 'axios';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+import { extractPdfText } from '../utils/pdfText.js';
+import { reportDownloadUrl } from '../utils/cloudinary.js';
+import { dosesForDate } from '../utils/medicineSchedule.js';
+import dayjs from 'dayjs';
+import { cleanText, buildField, countNonNull } from '../utils/reportExtraction.js';
 
 import {
   generateHealthInsights,
@@ -40,57 +42,9 @@ const log = {
   error: (ctx, msg, data = {}) => console.error(JSON.stringify({ level: 'error', ctx, msg, ...data, ts: new Date().toISOString() })),
 };
 
-function cleanText(text) {
-  return text.replace(/[^\x00-\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function normalizeUnit(unit) {
-  if (!unit) return null;
-  const u = unit.toLowerCase();
-  if (u.includes('mg'))                        return 'mg/dl';
-  if (u.includes('mmol'))                      return 'mmol/l';
-  if (u.includes('µmol') || u.includes('umol')) return 'µmol/l';
-  if (u.includes('%'))                         return '%';
-  return u;
-}
-
-function extractValue(patterns, text) {
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return { value: parseFloat(match[1]), unit: normalizeUnit(match[2] || null) };
-  }
-  return null;
-}
-
-function convert(value, unit, type) {
-  if (value == null) return null;
-  switch (type) {
-    case 'glucose':     return unit === 'mmol/l' ? value * 18.018 : value;
-    case 'cholesterol': return unit === 'mmol/l' ? value * 38.67  : value;
-    case 'creatinine':  return unit === 'µmol/l' ? value / 88.4   : value;
-    default:            return value;
-  }
-}
-
-function buildField(patterns, text, type = null) {
-  const raw = extractValue(patterns, text);
-  if (!raw) return null;
-  return { original: raw, standard: type ? convert(raw.value, raw.unit, type) : raw.value };
-}
-
 function isPdf(report) {
   if (report.content_type) return report.content_type === 'application/pdf';
   return report.file_url?.toLowerCase().includes('.pdf');
-}
-
-function countNonNull(obj, depth = 0) {
-  if (depth > 5) return 0;
-  let count = 0;
-  for (const val of Object.values(obj)) {
-    if (val !== null && val !== undefined)
-      count += typeof val === 'object' ? countNonNull(val, depth + 1) : 1;
-  }
-  return count;
 }
 
 export const startWorkers = async () => {
@@ -114,6 +68,11 @@ export const startWorkers = async () => {
 
         if (!medicine || !medicine.is_active) { log.warn('MedWorker', 'Skipped — inactive', { medicineId }); return; }
         if (!user)                             { log.warn('MedWorker', 'Skipped — no user',   { userId });    return; }
+
+        const dateStr = dayjs().tz(medicine.timezone || 'Asia/Kolkata').format('YYYY-MM-DD');
+        if (!dosesForDate(medicine, dateStr).length || !medicine.times.includes(time)) return;
+        const now = new Date();
+        if (now < new Date(medicine.start_date) || (medicine.end_date && now > new Date(medicine.end_date))) return;
 
         const doseStr = `${medicine.dosage}${medicine.unit ? ' ' + medicine.unit : ''}`;
         const msg     = `It's time to take your medicine: ${medicine.name} (${doseStr}).`;
@@ -146,7 +105,7 @@ export const startWorkers = async () => {
         ]);
 
         if (!appointment)                                         { log.warn('ApptWorker', 'No appointment', { appointmentId }); return; }
-        if (appointment.status === 'cancelled')                   { log.warn('ApptWorker', 'Cancelled',      { appointmentId }); return; }
+        if (!['scheduled', 'confirmed', 'rescheduled'].includes(appointment.status))                   { log.warn('ApptWorker', 'Cancelled',      { appointmentId }); return; }
         if (new Date(appointment.scheduled_at).getTime() < Date.now()) { log.warn('ApptWorker', 'Past',       { appointmentId }); return; }
         if (!user)                                                { log.warn('ApptWorker', 'No user',         { userId });        return; }
 
@@ -190,17 +149,20 @@ export const startWorkers = async () => {
 
         await HealthReport.findByIdAndUpdate(reportId, {
           ocr_status:         'processing',
+          error_message: null,
           ocr_started_at:     new Date(),
           ocr_attempt:        (report.ocr_attempt || 0) + 1,
         });
 
-        log.info('OCRWorker', 'Status set to processing', { reportId, fileUrl: report.file_url });
+        log.info('OCRWorker', 'Status set to processing', { reportId,  });
 
         let buffer;
         try {
-          const response = await axios.get(report.file_url, {
+          const response = await axios.get(reportDownloadUrl(report), {
             responseType: 'arraybuffer',
-            timeout:       60_000, 
+            timeout: 60_000,
+            maxContentLength: 10 * 1024 * 1024,
+            maxBodyLength: 10 * 1024 * 1024,
           });
           buffer = Buffer.from(response.data);
           log.info('OCRWorker', 'File downloaded', { reportId, bytes: buffer.length });
@@ -219,25 +181,9 @@ export const startWorkers = async () => {
 
         if (isPdf(report)) {
           log.info('OCRWorker', 'Using PDF extraction', { reportId });
-          try {
-            const parsed = await pdfParse(buffer);
-            text = parsed.text || '';
-            extractionMethod = 'pdf-parse';
-            log.info('OCRWorker', 'pdf-parse result', { reportId, chars: text.length });
-
-            if (text.trim().length < 30) {
-              log.warn('OCRWorker', 'PDF text layer thin, falling back to Tesseract', { reportId });
-              const result = await Tesseract.recognize(buffer, 'eng', { logger: () => {} });
-              text = result.data.text;
-              extractionMethod = 'tesseract-pdf-fallback';
-              log.info('OCRWorker', 'Tesseract fallback result', { reportId, chars: text.length });
-            }
-          } catch (pdfErr) {
-            log.warn('OCRWorker', 'pdfParse threw, using Tesseract', { reportId, err: pdfErr.message });
-            const result = await Tesseract.recognize(buffer, 'eng', { logger: () => {} });
-            text = result.data.text;
-            extractionMethod = 'tesseract-pdf-scan';
-          }
+          const result = await extractPdfText(buffer);
+          text = result.text;
+          extractionMethod = result.method;
         } else {
           log.info('OCRWorker', 'Using image OCR', { reportId });
           try {
@@ -267,7 +213,7 @@ export const startWorkers = async () => {
         }
 
         text = cleanText(text);
-        log.info('OCRWorker', 'Text extracted', { reportId, method: extractionMethod, chars: text.length, preview: text.slice(0, 120) });
+        log.info('OCRWorker', 'Text extracted', { reportId, method: extractionMethod, chars: text.length,  });
 
         if (text.trim().length === 0) {
           log.warn('OCRWorker', 'Empty OCR output — marking failed', { reportId });
@@ -287,7 +233,7 @@ export const startWorkers = async () => {
             total_cholesterol: buildField([/Total\s+Cholesterol\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
             ldl:               buildField([/LDL(?:[- ]C(?:holesterol)?)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
             hdl:               buildField([/HDL(?:[- ]C(?:holesterol)?)?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
-            triglycerides:     buildField([/Triglycerides?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'cholesterol'),
+            triglycerides:     buildField([/Triglycerides?\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|mmol\/l)?/i], text, 'triglycerides'),
           },
           kidney: {
             creatinine: buildField([/Creatinine\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(mg\/dl|µmol\/l|umol\/l)?/i], text, 'creatinine'),
@@ -307,7 +253,7 @@ export const startWorkers = async () => {
         };
 
         const confidence = countNonNull(extractedData);
-        log.info('OCRWorker', 'Biomarker extraction done', { reportId, confidence, extractedData: JSON.stringify(extractedData) });
+        log.info('OCRWorker', 'Biomarker extraction done', { reportId, confidence });
 
         await HealthReport.findByIdAndUpdate(reportId, {
           ocr_status:            'done',
@@ -353,6 +299,7 @@ export const startWorkers = async () => {
 
         await HealthReport.findByIdAndUpdate(reportId, {
           analysis_status:    'processing',
+          error_message: null,
           analysis_started_at: new Date(),
         });
 
@@ -360,8 +307,8 @@ export const startWorkers = async () => {
 
         try {
           const data       = report.extracted_data;
-          const riskScore  = calculateRiskScore(data);
-          const riskLabelObj = getRiskLabel(riskScore);
+          const riskScore  = countNonNull(data) > 0 ? calculateRiskScore(data) : null;
+          const riskLabelObj = riskScore === null ? { label: null } : getRiskLabel(riskScore);
           const riskLabel    = riskLabelObj.label; // serialize: Mongoose schema expects String
           log.info('AIWorker', 'Risk score computed', { reportId, riskScore, riskLabel });
 
@@ -370,14 +317,14 @@ export const startWorkers = async () => {
 
           log.info('AIWorker', 'Calling Groq for health insights', { reportId, rawTextLen: (report.raw_text || '').length });
           const aiRaw = await generateHealthInsights(data, report.raw_text || '');
-          log.info('AIWorker', 'Groq response received', { reportId, responseLen: aiRaw.length, preview: aiRaw.slice(0, 200) });
+          log.info('AIWorker', 'Groq response received', { reportId, responseLen: aiRaw.length });
 
           let aiInsights = null;
           try {
             aiInsights = JSON.parse(aiRaw);
             log.info('AIWorker', 'AI response parsed successfully', { reportId, keys: Object.keys(aiInsights) });
           } catch (parseErr) {
-            log.error('AIWorker', 'AI response JSON parse failed', { reportId, err: parseErr.message, rawSample: aiRaw.slice(0, 300) });
+            log.error('AIWorker', 'AI response JSON parse failed', { reportId, err: parseErr.message });
             aiInsights = {
               summary:     aiRaw,
               parse_error: true,
@@ -508,7 +455,7 @@ export const startWorkers = async () => {
         let processed = 0, skip = 0;
 
         while (true) {
-          const users = await User.find({ is_banned: false })
+          const users = await User.find({ is_banned: { $ne: true }, role: 'patient' })
             .select('_id email fcm_token')
             .skip(skip)
             .limit(BATCH_SIZE)
@@ -541,7 +488,13 @@ export const startWorkers = async () => {
   );
 
   for (const worker of workers) {
-    worker.on('failed',    (job, err) => log.error(`Worker:${worker.name}`, 'Job failed',    { jobId: job?.id, err: err.message }));
+    worker.on('failed', async (job, err) => {
+      log.error(`Worker:${worker.name}`, 'Job failed', { jobId: job?.id, err: err.message });
+      if (worker.name === QUEUES.OCR && job?.data?.reportId) {
+        try { await HealthReport.findByIdAndUpdate(job.data.reportId, { ocr_status: 'failed', error_message: err.message }); }
+        catch (updateErr) { log.error('OCRWorker', 'Failed to persist error', { err: updateErr.message }); }
+      }
+    });
     worker.on('error',     (err)      => log.error(`Worker:${worker.name}`, 'Worker error',  { err: err.message }));
     worker.on('active',    (job)      => log.info( `Worker:${worker.name}`, 'Job active',    { jobId: job?.id }));
     worker.on('completed', (job)      => log.info( `Worker:${worker.name}`, 'Job completed', { jobId: job?.id }));

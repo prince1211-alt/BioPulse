@@ -1,3 +1,5 @@
+import { validate } from '../middleware/validate.js';
+import { prescriptionSchema, templateSchema } from '../schemas/prescription.schema.js';
 import { Router } from 'express';
 import {
   createPrescription,
@@ -7,17 +9,17 @@ import {
   saveTemplate,
   getTemplates
 } from '../controllers/prescription.controller.js';
-import { authenticate } from '../middleware/auth_middleware.js';
+import { authenticate, requireRole } from '../middleware/auth_middleware.js';
 
 const router = Router();
 
 router.use(authenticate);
 
-router.post('/', createPrescription);
+router.post('/', requireRole('doctor'), validate(prescriptionSchema), createPrescription);
 router.get('/patient', getPatientPrescriptions);
-router.get('/doctor', getDoctorPrescriptions);
-router.get('/templates', getTemplates);
-router.post('/templates', saveTemplate);
+router.get('/doctor', requireRole('doctor'), getDoctorPrescriptions);
+router.get('/templates', requireRole('doctor'), getTemplates);
+router.post('/templates', requireRole('doctor'), validate(templateSchema), saveTemplate);
 router.get('/:id', getPrescriptionById);
 
 export default router;

@@ -6,5 +6,5 @@ export const uploadReportSchema = z.object({
   report_type: z.enum(VALID_REPORT_TYPES, {
     errorMap: () => ({ message: `report_type must be one of: ${VALID_REPORT_TYPES.join(', ')}` }),
   }),
-  report_date: z.string().optional(),
+  report_date: z.union([z.iso.date(), z.iso.datetime({ offset: true })]).optional(),
 });

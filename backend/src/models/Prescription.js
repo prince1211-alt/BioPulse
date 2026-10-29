@@ -51,4 +51,6 @@ const prescriptionSchema = new mongoose.Schema(
   }
 );
 
+prescriptionSchema.index({ appointment_id: 1 }, { unique: true, partialFilterExpression: { appointment_id: { $type: 'objectId' }, is_template: false } });
+
 export const Prescription = mongoose.model('Prescription', prescriptionSchema);

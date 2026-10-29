@@ -46,8 +46,14 @@ export const findReportsByBiomarker = async (userId, biomarker, limit) => {
     user_id: userId,
     [`extracted_data.${biomarker}`]: { $exists: true },
   })
-    .sort({ report_date: 1 })
+    .sort({ report_date: -1 })
     .limit(limit)
     .select(`report_date report_type extracted_data.${biomarker}`)
     .lean();
 };
+
+export const claimAnalysis = (reportId, userId, staleBefore) => HealthReport.findOneAndUpdate({
+  _id: reportId, user_id: userId, ocr_status: 'done',
+  $or: [{ analysis_status: { $in: ['done', 'failed'] } }, { analysis_status: 'processing', analysis_started_at: { $lte: staleBefore } }],
+}, { analysis_status: 'pending', error_message: null }, { returnDocument: 'after' });
+export const failAnalysisQueue = (reportId, message) => HealthReport.findByIdAndUpdate(reportId, { analysis_status: 'failed', error_message: message });

@@ -27,6 +27,14 @@ const userSchema = new mongoose.Schema(
     refresh_token: {
       type: String,
     },
+    is_banned: { type: Boolean, default: false },
+    token_version: { type: Number, default: 0 },
+    last_login: Date,
+    permissions: { type: [String], default: [] },
+    chronic_conditions: { type: [String], default: undefined },
+    emergency_contact: String,
+    patient_type: { type: String, enum: ['general', 'diabetic', 'hypertensive', 'renal'], default: 'general' },
+    goal: { type: String, enum: ['maintenance', 'weight_loss', 'weight_gain'], default: 'maintenance' },
 
     role: {
       type: String,

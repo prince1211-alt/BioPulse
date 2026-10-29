@@ -630,7 +630,7 @@ export function DietPage() {
     removeMealMutation.mutate({ mealType, itemId });
   };
 
-  const handleOpenSearch = (mealType = 'breakfast') => {
+  const handleOpenSearch = (_mealType = 'breakfast') => {
     // If we want to set default meal type in modal, we'd need to lift that state up or pass it
     // For now we just show the modal. The modal state handles meal type internally, but we can update FoodSearchModal if needed.
     setShowSearch(true);

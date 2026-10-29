@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { format, isFuture, isToday } from 'date-fns';
+import { format, isFuture } from 'date-fns';
 import {
   CalendarCheck, Clock, CheckCircle2, XCircle,
   Stethoscope, Search, UserCircle, RefreshCw,
@@ -30,8 +30,8 @@ function RescheduleModal({ appointment, onClose, onConfirm, isPending }) {
   const [selectedSlot, setSelectedSlot] = useState(null);
 
   const { data: schedulesRes } = useQuery({
-    queryKey: ['doctorSchedules', appointment.doctor?._id || appointment.doctor_id],
-    queryFn: () => appointmentApi.getDoctorSchedules(appointment.doctor?._id || appointment.doctor_id).then(r => r.data?.data || r.data || []),
+    queryKey: ['doctorSchedules', appointment.doctor?._id || appointment.doctor_id?._id || appointment.doctor_id],
+    queryFn: () => appointmentApi.getDoctorSchedules(appointment.doctor?._id || appointment.doctor_id?._id || appointment.doctor_id).then(r => r.data?.data || r.data || []),
   });
 
   const schedules = Array.isArray(schedulesRes) ? schedulesRes : [];
@@ -742,10 +742,18 @@ function WritePrescriptionModal({ appointment, onClose }) {
   const templates = Array.isArray(templatesRes) ? templatesRes : [];
 
   const createPrescriptionMutation = useMutation({
-    mutationFn: (data) => prescriptionApi.create(data),
+    mutationFn: async data => {
+      const result = await prescriptionApi.create(data);
+      if (data.is_template) {
+        try { await prescriptionApi.saveTemplate(data); }
+        catch (err) { toast.error(`Prescription saved, but template could not be saved: ${err.message}`); }
+      }
+      return result;
+    },
     onSuccess: () => {
       toast.success('Prescription created & sent successfully!');
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['doctorTemplates'] });
       onClose();
     },
     onError: (err) => toast.error(err.message || 'Failed to create prescription'),
